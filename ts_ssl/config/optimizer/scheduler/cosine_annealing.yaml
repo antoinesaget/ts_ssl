@@ -1,0 +1,2 @@
+name: cosine
+eta_min: 0.0005  # Minimum learning rate

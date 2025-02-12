@@ -1,0 +1,5 @@
+_target_: ts_ssl.models.resnet.ResNetGrouped
+
+n_channels: ${dataset.n_channels}
+n_filters: 256
+embedding_dim: 512 

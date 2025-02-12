@@ -1,0 +1,11 @@
+defaults:
+  - base
+  - _self_
+
+name: vicreg
+_target_: ts_ssl.models.vicreg.VICReg
+
+projection_dim: 128
+sim_coeff: 25.0
+std_coeff: 25.0
+cov_coeff: 1.0 

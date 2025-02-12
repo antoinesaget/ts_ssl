@@ -1,0 +1,9 @@
+_target_: ts_ssl.models.pseltae.stclassifier.PseLTae
+
+embedding_dim: 512
+input_dim: ${dataset.n_channels}
+mlp1: [64, 128] # mlp1 = [input_dim] + mlp1
+mlp2: [256, 256]
+mlp3: [512] # mlp3 = mlp3 + [embedding_dim]
+len_max_seq: ${dataset.n_timesteps}
+d_model: 512

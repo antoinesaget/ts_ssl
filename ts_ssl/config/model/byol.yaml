@@ -1,0 +1,9 @@
+defaults:
+  - _self_
+
+name: byol
+_target_: ts_ssl.models.byol.BYOL
+
+projection_dim: 256
+prediction_dim: 256
+momentum: 0.996

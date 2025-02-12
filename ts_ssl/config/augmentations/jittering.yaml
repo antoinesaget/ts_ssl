@@ -1,0 +1,15 @@
+name: jittering
+
+views_sampling_strategy: "group"
+
+view1:
+  transforms:
+    jittering:
+      _target_: ts_ssl.data.augmentations.Jittering
+      sigma: 0.1
+      
+view2:
+  transforms:
+    jittering:
+      _target_: ts_ssl.data.augmentations.Jittering
+      sigma: 0.1

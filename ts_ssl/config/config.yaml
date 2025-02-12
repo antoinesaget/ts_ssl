@@ -1,0 +1,59 @@
+defaults:
+  - location: local
+  - model: simclr
+  - augmentations: resampling
+  - dataset: francecrops_mini
+  - optimizer: base
+  - _self_
+
+hydra:
+  run:
+    dir: ${output_dir}
+
+output_dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${dataset.name}_${model.name}_${augmentations.name}
+
+seed: 2025
+num_workers: 4
+device: cuda
+precision: 16
+
+logging:
+  enabled_loggers: ["logger", "csv"]  # Available options: logger, tensorboard, csv, neptune
+  neptune:
+    enabled: false  # Neptune logger requires additional setup, disabled by default
+    project: "rs-ts-ssl"  
+    capture_hardware_metrics: true
+    capture_stderr: false
+    capture_stdout: false
+    source_files: []
+
+training:
+  max_examples_seen: 50000000
+  val_check_interval: 1000
+  batch_size: 1024
+  n_samples_per_group: 4
+  checkpoints:
+    monitored_metrics:
+      - metric: "training/val_acc_5"
+        mode: "max"
+        filename: "best_val_acc_5.pt"
+    save_last: true
+
+validation:
+  batch_size: 64
+  samples_per_class: [5, 50]
+  downstream_models:
+    lr:
+      max_iter: 2000
+      tol: 1e-5
+      C: 1.0
+      n_jobs: -1  # Only used for sklearn
+
+post_training_eval: false
+eval:
+  samples_per_class: [5, 10, 20, 50, 100]
+  seed: ${seed}
+  use_raw_features: false
+  batch_size: ${validation.batch_size}
+  downstream_models: ${validation.downstream_models}
+  checkpoint_path: null

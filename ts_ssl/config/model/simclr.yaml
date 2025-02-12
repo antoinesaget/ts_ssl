@@ -1,0 +1,10 @@
+defaults:
+  - base
+  - _self_
+
+name: simclr
+_target_: ts_ssl.models.simclr.SimCLR
+
+projection_dim: 128
+temperature: 0.1
+

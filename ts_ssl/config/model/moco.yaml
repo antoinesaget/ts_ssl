@@ -1,0 +1,11 @@
+defaults:
+  - base
+  - _self_
+
+name: moco
+_target_: ts_ssl.models.moco.MoCo
+
+projection_dim: 128
+momentum: 0.996
+memory_bank_size: 4096
+temperature: 0.1

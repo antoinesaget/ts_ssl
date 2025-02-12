@@ -1,0 +1,19 @@
+name: ts_ssl_gpu
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+  - defaults
+dependencies:
+  - python=3.12
+  - pytorch=2.4
+  - pytorch-cuda=12.4
+  - scikit-learn
+  - pandas
+  - pip
+  - pip:
+    - hydra-core==1.3.2
+    - mmap-ninja
+    - lightly
+    - torchinfo
+    - -e .

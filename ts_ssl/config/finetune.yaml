@@ -1,0 +1,37 @@
+defaults:
+  - config
+  - _self_
+
+output_dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${dataset.name}_finetune
+
+finetune:
+  # Checkpoint to finetune
+  checkpoint_path: null
+  
+  # Training parameters
+  max_epochs: 500
+  patience: 50
+  batch_size: 64
+  initial_frozen_epochs: 10
+  
+  # Optimizer parameters
+  learning_rate:
+    encoder: 2e-5
+    classifier: 1e-3
+  weight_decay: 1e-4
+  
+  # Model parameters
+  classifier:
+    hidden_dim: 256
+    dropout: 0.2
+    
+  # Evaluation parameters
+  eval_batch_size: 2048
+  save_predictions: true
+  metrics_output_file: "evaluation_results.csv"
+  summary_output_file: "evaluation_results_summary.csv"
+
+# Override default config values
+device: cuda
+num_workers: 4
+seed: 2025 

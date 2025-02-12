@@ -1,0 +1,21 @@
+name: resizing
+
+views_sampling_strategy: "group"
+
+view1:
+  transforms:
+    jittering:
+      _target_: ts_ssl.data.augmentations.Jittering
+      sigma: 0.03
+    resizing:
+      _target_: ts_ssl.data.augmentations.Resizing
+      magnitude: 0.05
+      
+view2:
+  transforms:
+    jittering:
+      _target_: ts_ssl.data.augmentations.Jittering
+      sigma: 0.03
+    resizing:
+      _target_: ts_ssl.data.augmentations.Resizing
+      magnitude: 0.3

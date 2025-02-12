@@ -1,0 +1,5 @@
+name: one_cycle
+max_lr: ${optimizer.learning_rate}  # Will use the base learning rate as max_lr
+pct_start: 0.2  # Percentage of training where LR increases
+div_factor: 25.0  # Initial LR = max_lr/div_factor
+final_div_factor: 1e4  # Final LR = max_lr/(div_factor*final_div_factor)
