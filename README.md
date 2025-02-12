@@ -1,6 +1,6 @@
-# Remote Sensing Time Series Self-Supervised Learning (RS-TS-SSL)
+# Time Series Self-Supervised Learning (TS-SSL)
 
-A framework for self-supervised learning on remote sensing time series data, supporting various contrastive learning approaches and data augmentation techniques.
+A framework for self-supervised learning on time series data, supporting various contrastive learning approaches and data augmentation techniques.
 
 ## Citation
 
@@ -172,4 +172,4 @@ python ts_ssl/train.py --help
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+🚧 Work in Progress 🚧
