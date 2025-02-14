@@ -15,6 +15,13 @@ try:
 except ImportError:
     NEPTUNE_AVAILABLE = False
 
+try:
+    from datasets import Dataset as HFDataset
+
+    HUGGINGFACE_AVAILABLE = True
+except ImportError:
+    HUGGINGFACE_AVAILABLE = False
+
 from ts_ssl.data.datamodule import (
     SSLGroupedTimeSeriesDataset,
     SupervisedGroupedTimeSeriesDataset,
@@ -45,6 +52,17 @@ def main(config):
             capture_stderr=neptune_config["capture_stderr"],
             capture_stdout=neptune_config["capture_stdout"],
             source_files=neptune_config["source_files"],
+        )
+
+    # Check if Hugging Face is required but not available
+    if (
+        hasattr(config.dataset, "dataset_type")
+        and config.dataset.dataset_type == "huggingface"
+        and not HUGGINGFACE_AVAILABLE
+    ):
+        raise ImportError(
+            "Hugging Face datasets package is required but not installed. "
+            "Please install it with `pip install datasets`"
         )
 
     # Initialize logger manager
@@ -85,12 +103,13 @@ def main(config):
     # Initialize datasets and dataloaders
     logger.info("Instantiating SSL training dataset and dataloader")
     train_dataset = SSLGroupedTimeSeriesDataset(
-        data_dir=config.dataset.ssl_data_dir,
+        data=config.dataset.ssl_data,
         n_samples_per_group=config.training.n_samples_per_group,
         percentiles=config.dataset.percentiles,
         config=config.augmentations,
         logger=logger,
         normalize_data=config.dataset.normalize,
+        dataset_type=config.dataset.dataset_type,
     )
     train_loader = DataLoader(
         train_dataset,
@@ -100,20 +119,28 @@ def main(config):
         drop_last=True,
     )
 
-    logger.info("Instantiating supervised validation dataset and dataloader")
-    val_dataset = SupervisedGroupedTimeSeriesDataset(
-        data_dir=config.dataset.validation_data_dir,
-        percentiles=config.dataset.percentiles,
-        logger=logger,
-        normalize_data=config.dataset.normalize,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.validation.batch_size,
-        num_workers=config.num_workers,
-        shuffle=False,
-        drop_last=False,
-    )
+    # Conditionally instantiate the supervised validation dataset and dataloader
+    val_loader = None
+    if getattr(config.dataset, "validation_data", None):
+        logger.info("Instantiating supervised validation dataset and dataloader")
+        val_dataset = SupervisedGroupedTimeSeriesDataset(
+            data=config.dataset.validation_data,
+            percentiles=config.dataset.percentiles,
+            logger=logger,
+            normalize_data=config.dataset.normalize,
+            dataset_type=config.dataset.dataset_type,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config.validation.batch_size,
+            num_workers=config.num_workers,
+            shuffle=False,
+            drop_last=False,
+        )
+    else:
+        logger.warning(
+            "No validation set provided in the config; proceeding without validation."
+        )
 
     # Initialize optimizer
     logger.info("Instantiating SGD optimizer")
@@ -124,7 +151,7 @@ def main(config):
         weight_decay=config.optimizer.weight_decay,
     )
 
-    # Initialize trainer
+    # Initialize trainer (pass val_batch_size only if validation loader exists)
     logger.info("Instantiating trainer")
     trainer = Trainer(
         model=model,
@@ -135,7 +162,7 @@ def main(config):
         output_dir=config.output_dir,
         val_check_interval=config.training.val_check_interval,
         logger=logger,
-        val_batch_size=config.validation.batch_size,
+        val_batch_size=config.validation.batch_size if val_loader is not None else None,
         config=config,
     )
 
@@ -152,19 +179,11 @@ def main(config):
         eval_config = config.copy()
         eval_config.output_dir = str(Path(config.output_dir) / "eval")
 
-        metric_pattern = (
-            config.training.checkpoints.monitored_metrics[0].filename[:-3]
-            + "_*_step_*.pt"
-        )
-        checkpoint_files = list(
-            Path(config.output_dir).glob(f"checkpoints/{metric_pattern}")
-        )
-        if not checkpoint_files:
-            raise ValueError(
-                f"No checkpoint files found matching pattern {metric_pattern}"
-            )
-        eval_config.eval.checkpoint_path = str(checkpoint_files[0])
+        best_checkpoint_path = trainer.get_best_checkpoint_path()
+        if best_checkpoint_path is None:
+            raise ValueError("No checkpoints found for evaluation")
 
+        eval_config.eval.checkpoint_path = str(best_checkpoint_path)
         evaluate_main(eval_config, logger)
 
     logger.close()

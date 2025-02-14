@@ -156,6 +156,23 @@ def evaluate_main(config, logger=None):
         torch.cuda.manual_seed(config.seed)
     device = torch.device(config.device)
 
+    # Validate required data directories are provided
+    if not hasattr(config.dataset, "cross_validation_dir"):
+        # Classic mode validation
+        if not (
+            hasattr(config.dataset, "train_data")
+            and hasattr(config.dataset, "test_data")
+        ):
+            raise ValueError(
+                "Both train_data and test_data must be provided in config.dataset for classic evaluation mode"
+            )
+    else:
+        # Cross validation mode validation
+        if not Path(config.dataset.cross_validation_dir).exists():
+            raise ValueError(
+                f"Cross validation directory {config.dataset.cross_validation_dir} does not exist"
+            )
+
     Path(config.output_dir).mkdir(parents=True, exist_ok=True)
 
     if logger is None:
@@ -290,59 +307,88 @@ def evaluate_main(config, logger=None):
             data_dirs = data_dirs[: config.dataset.num_train_subsets]
             logger.info(f"Using {len(data_dirs)} folds")
     else:
-        # Classic mode: Extract training features
-        train_dir = Path(config.dataset.train_data_dir)
-        data_dirs = sorted(train_dir.glob("subset_*"))
-        if config.dataset.num_train_subsets is not None:
-            data_dirs = data_dirs[: config.dataset.num_train_subsets]
-            logger.info(f"Using {len(data_dirs)} training subsets")
+        # Classic mode: Extract training features from subsets
+        if hasattr(config.dataset, "num_train_subsets"):
+            train_subsets = [
+                {**config.dataset.train_data, "split": f"train_subset_{i}"}
+                for i in range(config.dataset.num_train_subsets)
+            ]
+        else:
+            train_subsets = [config.dataset.train_data]
+        logger.info(f"Using {len(train_subsets)} training subsets")
 
     if config.eval.use_raw_features:
         logger.info("Using raw features for evaluation")
     else:
         logger.info("Using model features for evaluation")
 
-    # Precompute features for all directories
-    for data_dir in data_dirs:
-        logger.info(f"\nExtracting features for: {data_dir.name}")
-        dataset = SupervisedGroupedTimeSeriesDataset(
-            data_dir=data_dir,
-            percentiles=config.dataset.percentiles,
-            logger=logger,
-            normalize_data=config.dataset.normalize,
-        )
-        loader = DataLoader(
-            dataset,
-            batch_size=config.eval.batch_size,
-            num_workers=config.num_workers,
-            shuffle=False,
-        )
+    # Precompute features for all directories/subsets
+    if is_cross_validation:
+        for data_dir in data_dirs:
+            logger.info(f"\nExtracting features for: {data_dir.name}")
+            dataset = SupervisedGroupedTimeSeriesDataset(
+                data_dir=data_dir,
+                percentiles=config.dataset.percentiles,
+                logger=logger,
+                normalize_data=config.dataset.normalize,
+            )
+            loader = DataLoader(
+                dataset,
+                batch_size=config.eval.batch_size,
+                num_workers=config.num_workers,
+                shuffle=False,
+            )
 
-        # Extract features
-        features, labels = extract_features(
-            model,
-            loader,
-            device,
-            use_raw_features=config.eval.use_raw_features,
-            group_size=config.dataset.group_size,
-        )
-        # Store features in CPU RAM
-        features_cache[data_dir.name] = (
-            features.cpu(),
-            labels.cpu(),
-        )
+            # Extract features
+            features, labels = extract_features(
+                model,
+                loader,
+                device,
+                use_raw_features=config.eval.use_raw_features,
+                group_size=config.dataset.group_size,
+            )
+            # Store features in CPU RAM
+            features_cache[data_dir.name] = (features.cpu(), labels.cpu())
+            del dataset, loader
+    else:
+        # Classic mode: Extract features for each training subset
+        for i, train_subset in enumerate(train_subsets):
+            subset_name = f"subset_{i}"
+            logger.info(f"\nExtracting features for training {subset_name}")
+            dataset = SupervisedGroupedTimeSeriesDataset(
+                data=train_subset,
+                percentiles=config.dataset.percentiles,
+                logger=logger,
+                normalize_data=config.dataset.normalize,
+                dataset_type=config.dataset.dataset_type,
+            )
+            loader = DataLoader(
+                dataset,
+                batch_size=config.eval.batch_size,
+                num_workers=config.num_workers,
+                shuffle=False,
+            )
 
-        # Free up memory
-        del dataset, loader
+            # Extract features
+            features, labels = extract_features(
+                model,
+                loader,
+                device,
+                use_raw_features=config.eval.use_raw_features,
+                group_size=config.dataset.group_size,
+            )
+            # Store features in CPU RAM
+            features_cache[subset_name] = (features.cpu(), labels.cpu())
+            del dataset, loader
 
-    if not is_cross_validation:
-        # For classic mode, also extract test features
+        # Extract test features
         logger.info("\nExtracting features for test dataset")
         test_dataset = SupervisedGroupedTimeSeriesDataset(
-            data_dir=config.dataset.test_data_dir,
+            data=config.dataset.test_data,
             percentiles=config.dataset.percentiles,
             logger=logger,
             normalize_data=config.dataset.normalize,
+            dataset_type=config.dataset.dataset_type,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -362,7 +408,6 @@ def evaluate_main(config, logger=None):
         test_features = test_features.cpu()
         test_labels = test_labels.cpu()
 
-        # Free up memory
         del test_dataset, test_loader
 
     # For each number of samples per class
@@ -478,9 +523,10 @@ def evaluate_main(config, logger=None):
                 test_labels_gpu = test_labels.to(device)
 
                 # Process each training subset
-                for train_dir in data_dirs:
+                for i, train_subset in enumerate(train_subsets):
+                    subset_name = f"subset_{i}"
                     # Get cached training features and move to GPU
-                    train_features, train_labels = features_cache[train_dir.name]
+                    train_features, train_labels = features_cache[subset_name]
                     train_features = train_features.to(device)
                     train_labels = train_labels.to(device)
 
@@ -503,7 +549,7 @@ def evaluate_main(config, logger=None):
 
                     if results is not None:
                         result_entry = {
-                            "train_subset": train_dir.name,
+                            "train_subset": subset_name,
                             "test_dataset": config.dataset.name,
                             "samples_per_class": n_samples,
                             "evaluator": evaluator_name,
@@ -517,7 +563,7 @@ def evaluate_main(config, logger=None):
                         )
 
                         logger.info(
-                            f"Results for {train_dir.name}:"
+                            f"Results for {subset_name}:"
                             f"\n\tAccuracy: {results['accuracy']:.4f}"
                             f"\n\tMajority Accuracy: {results['majority_accuracy']:.4f}"
                             f"\n\tKappa: {results['kappa']:.4f}"

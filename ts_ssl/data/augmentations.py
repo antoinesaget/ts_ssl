@@ -464,7 +464,7 @@ class Compose:
 
 
 def sample_groups(
-    x: torch.Tensor, n_samples: int, strategy: Literal["group", "copy"]
+    x: torch.Tensor, n_samples: int, strategy: Literal["group", "copy", "none"]
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Sample groups from input tensor using specified strategy
 
@@ -481,6 +481,8 @@ def sample_groups(
     Returns:
         Tuple of tensors (view1, view2), each of shape (n_samples, T, C)
     """
+    if strategy == "none":
+        return x, x
     if not isinstance(x, torch.Tensor):
         raise TypeError(f"Input must be a torch.Tensor, got {type(x)}")
 

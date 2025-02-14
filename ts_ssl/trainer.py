@@ -25,7 +25,7 @@ class Trainer:
         val_check_interval,
         config,
         logger: LoggerManager,
-        val_batch_size: int = 64,
+        val_batch_size: int = None,
         n_classes: int = 20,
     ):
         self.model = model.to(device)
@@ -44,13 +44,29 @@ class Trainer:
         self.checkpoint_dir = self.output_dir / "checkpoints"
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
-        # Initialize training state
+        # Initialize training state and checkpoint tracking
         self.global_step = 0
         self.best_metrics = {}
-        for metric_config in config.training.checkpoints.monitored_metrics:
+        self.best_checkpoint_paths = {}  # Track best checkpoint path for each metric
+        self.last_checkpoint_path = None  # Track last checkpoint path
+
+        # If no validation set, monitor training loss instead
+        if val_loader is None:
+            self.monitored_metrics = [
+                {
+                    "metric": "training/train_loss",
+                    "mode": "min",
+                    "filename": "train_loss.pt",
+                }
+            ]
+        else:
+            self.monitored_metrics = config.training.checkpoints.monitored_metrics
+
+        for metric_config in self.monitored_metrics:
             self.best_metrics[metric_config["metric"]] = (
                 float("inf") if metric_config["mode"] == "min" else float("-inf")
             )
+            self.best_checkpoint_paths[metric_config["metric"]] = None
 
         self.scaler = GradScaler()
 
@@ -120,7 +136,10 @@ class Trainer:
                         )
 
                     # Validation
-                    if self.global_step % self.val_check_interval == 0:
+                    if (
+                        self.val_loader is not None
+                        and self.global_step % self.val_check_interval == 0
+                    ):
                         self.validate()
                         self.model.train()
 
@@ -149,16 +168,21 @@ class Trainer:
 
         loss_value = loss.item()
 
+        # Log and potentially checkpoint training metrics
         if self.global_step % 100 == 0:
-            lr = (
-                self.scheduler.get_last_lr()[0]
-                if self.scheduler is not None
-                else self.optimizer.param_groups[0]["lr"]
-            )
-            self.log_metrics(
-                {"training/learning_rate": lr},
-                ignore_loggers=["logger"],
-            )
+            metrics = {"training/train_loss": loss_value}
+            if self.scheduler is not None:
+                lr = self.scheduler.get_last_lr()[0]
+            else:
+                lr = self.optimizer.param_groups[0]["lr"]
+            metrics["training/learning_rate"] = lr
+
+            self.log_metrics(metrics, ignore_loggers=["logger"])
+
+            # Check for checkpointing if we're using training metrics
+            if self.val_loader is None:
+                self.check_and_save_checkpoints(metrics)
+
         # Step the scheduler if it exists
         if self.scheduler is not None and old_scaler <= new_scaler:
             self.scheduler.step()
@@ -167,6 +191,9 @@ class Trainer:
 
     def validate(self):
         """Run validation with linear evaluation using either scikit-learn or cuML"""
+        if self.val_loader is None:
+            return {}
+
         self.model.eval()
         features_list = []
         labels_list = []
@@ -265,15 +292,25 @@ class Trainer:
                     # Train classifier
                     evaluator.fit(X_train_flat, y_train_flat)
 
+                    # Batch prediction
+                    batch_size = 1000
+                    num_batches = (len(X_test_flat) + batch_size - 1) // batch_size
+                    y_pred_flat = []
+                    for i in range(num_batches):
+                        start = i * batch_size
+                        end = min(start + batch_size, len(X_test_flat))
+                        X_test_batch = X_test_flat[start:end]
+                        y_pred_batch = evaluator.predict(X_test_batch)
+                        y_pred_flat.append(y_pred_batch)
+                    y_pred_flat = np.concatenate(y_pred_flat)
+
                     # Evaluate per-timeseries accuracy
-                    y_pred_flat = evaluator.predict(X_test_flat)
                     acc = (y_pred_flat == y_test_flat).mean()
 
                     # Evaluate majority vote accuracy
                     y_pred_groups = y_pred_flat.reshape(
                         -1, self.config.dataset.group_size
                     )
-
                     majority_pred = np.array(
                         [np.bincount(group).argmax() for group in y_pred_groups]
                     )
@@ -297,8 +334,19 @@ class Trainer:
                     # Train classifier
                     evaluator.fit(X_train_flat, y_train_flat)
 
-                    # Evaluate per-timeseries accuracy
-                    y_pred_flat = evaluator.predict(X_test_flat)
+                    # Batch prediction
+                    batch_size = 1000
+                    num_batches = (len(X_test_flat) + batch_size - 1) // batch_size
+                    y_pred_flat = []
+                    for i in range(num_batches):
+                        start = i * batch_size
+                        end = min(start + batch_size, len(X_test_flat))
+                        X_test_batch = X_test_flat[start:end]
+                        y_pred_batch = evaluator.predict(X_test_batch)
+                        y_pred_flat.append(y_pred_batch)
+                    y_pred_flat = np.concatenate(y_pred_flat)
+
+                    # Evaluate accuracy
                     acc = (y_pred_flat == y_test_flat).mean()
 
                     # Log metrics
@@ -307,17 +355,25 @@ class Trainer:
                         f"training/val_acc_{n_samples}": acc,
                     }
                     results.update(metrics)
+
         # Log all metrics
         self.log_metrics(results)
 
+        # Check metrics and save checkpoints
+        self.check_and_save_checkpoints(results)
+
+        return results
+
+    def check_and_save_checkpoints(self, metrics):
+        """Check if monitored metrics improved and save checkpoints accordingly"""
         # Check if any monitored metrics improved and save checkpoints
-        for metric_config in self.config.training.checkpoints.monitored_metrics:
+        for metric_config in self.monitored_metrics:
             metric_name = metric_config["metric"]
             mode = metric_config["mode"]
             base_filename = metric_config["filename"]
 
-            if metric_name in results:
-                current_value = results[metric_name]
+            if metric_name in metrics:
+                current_value = metrics[metric_name]
                 best_value = self.best_metrics[metric_name]
 
                 improved = (mode == "min" and current_value <= best_value) or (
@@ -328,9 +384,11 @@ class Trainer:
                     self.best_metrics[metric_name] = current_value
                     # Create filename with step and metric value
                     filename = f"{base_filename[:-3]}_{current_value:.4f}_step_{self.global_step}.pt"
+                    checkpoint_path = self.checkpoint_dir / filename
 
                     # Save new checkpoint
-                    self.save_checkpoint(filename)
+                    self.save_checkpoint(checkpoint_path)
+                    self.best_checkpoint_paths[metric_name] = checkpoint_path
 
                     # Remove previous best checkpoint if it exists
                     prev_checkpoints = list(
@@ -348,18 +406,17 @@ class Trainer:
         # Save last checkpoint if configured
         if self.config.training.checkpoints.save_last:
             last_filename = f"last_step_{self.global_step}.pt"
-            # Remove previous last checkpoint if it exists
-            prev_last = list(self.checkpoint_dir.glob("last_step*.pt"))
+            last_checkpoint_path = self.checkpoint_dir / last_filename
 
             # Save new last checkpoint
-            self.save_checkpoint(last_filename)
+            self.save_checkpoint(last_checkpoint_path)
+            self.last_checkpoint_path = last_checkpoint_path
 
-            # Remove old last checkpoint
+            # Remove previous last checkpoint if it exists
+            prev_last = list(self.checkpoint_dir.glob("last_step*.pt"))
             for checkpoint in prev_last:
                 if checkpoint.name != last_filename:
                     checkpoint.unlink()
-
-        return results
 
     def log_metrics(
         self,
@@ -377,12 +434,22 @@ class Trainer:
         step = step or self.global_step
         self.logger.log_metrics(metrics, step, ignore_loggers=ignore_loggers)
 
-    def save_checkpoint(self, filename: str):
+    def save_checkpoint(self, path: Path):
         """Save model checkpoint"""
         checkpoint = {
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
         }
-        path = self.checkpoint_dir / filename
         torch.save(checkpoint, path)
         self.logger.info(f"Saved checkpoint to {path}")
+
+    def get_best_checkpoint_path(self):
+        """Get the path of the best checkpoint based on monitored metrics"""
+        # If we have monitored metrics, return the best checkpoint for the first metric
+        if self.monitored_metrics:
+            metric_name = self.monitored_metrics[0]["metric"]
+            if self.best_checkpoint_paths[metric_name]:
+                return self.best_checkpoint_paths[metric_name]
+
+        # If no best metric checkpoint or no metrics monitored, return last checkpoint
+        return self.last_checkpoint_path

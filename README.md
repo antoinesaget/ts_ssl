@@ -52,24 +52,31 @@ conda activate ts_ssl
 
 ### 2 - Data Setup
 
-🚧 Work in Progress 🚧
-
-1. Download the sample dataset from [link]
-2. Configure your local data path:
-   - Copy `config/location/local.example.yaml` to `config/location/local.yaml`
-   - Edit `local.yaml` to set your dataset path:
-```yaml
-base_path: /path/to/your/dataset
+Install Hugging Face datasets:
+```bash
+pip install datasets
 ```
-Note: `local.yaml` is git-ignored to prevent committing personal paths.
+
+Download the sample dataset:
+```python
+python preload_datasets.py francecrops_nano
+```
+
+(Optional) If you want to download to a different location, change cache_dir in `ts_ssl/config/dataset/francecrops_nano.yaml`
+
+Note: only francecrops_nano is currently supported.
+Warning: currently the train, validation and test data are the same in francecrops_nano.
+
+More information on the dataset can be found here: https://huggingface.co/datasets/saget-antoine/francecrops
 
 ### 3 - Testing the Installation
 
 CPU test:
 ```bash
 python ts_ssl/train.py \
-    training.max_examples_seen=6400 \
-    training.val_check_interval=50 \
+    dataset=francecrops_mini \
+    training.max_examples_seen=10000 \
+    training.val_check_interval=100 \
     post_training_eval=true \
     model.encoder.n_filters=64 \
     model.encoder.embedding_dim=128 \
@@ -77,15 +84,15 @@ python ts_ssl/train.py \
     num_workers=8 \
     "validation.samples_per_class=[5,10]" \
     "eval.samples_per_class=[5,10]" \
-    dataset.num_train_subsets=2 \
     device=cpu
 ```
 
 GPU test:
 ```bash
 python ts_ssl/train.py \
-    training.max_examples_seen=6400 \
-    training.val_check_interval=50 \
+    dataset=francecrops_mini \
+    training.max_examples_seen=40000 \
+    training.val_check_interval=200 \
     post_training_eval=true \
     model.encoder.n_filters=64 \
     model.encoder.embedding_dim=128 \
@@ -93,7 +100,6 @@ python ts_ssl/train.py \
     num_workers=8 \
     "validation.samples_per_class=[5,10]" \
     "eval.samples_per_class=[5,10]" \
-    dataset.num_train_subsets=2 \
     device=cuda
 ```
 
