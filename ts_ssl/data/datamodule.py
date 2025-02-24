@@ -6,6 +6,7 @@ import hydra
 import mmap_ninja
 import numpy as np
 import torch
+import torch.multiprocessing as mp
 from torch.utils.data import Dataset
 
 try:
@@ -151,6 +152,25 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
     ):
         super().__init__(data, percentiles, transform, logger, normalize_data)
 
+        # Initialize shared memory for timing stats
+        self.shared_stats = {
+            key: mp.Value("d", 0.0)
+            for key in [
+                # Data loading breakdown
+                "data_fetch",  # Time to fetch from dataset
+                "data_copy",  # Time to copy data (if needed)
+                "to_tensor",  # Time to convert to tensor
+                "to_float",  # Time to convert to float
+                # Other steps
+                "group_sampling",
+                "normalization",
+                "multiview_transform",
+                "view_specific_transform",
+                "total_time",
+            ]
+        }
+        self.shared_samples = mp.Value("i", 0)
+
         self.logger.info(f"Loading {dataset_type} data from {self.data_dir}")
 
         # Load data based on dataset type
@@ -194,7 +214,27 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
         transforms = [hydra.utils.instantiate(t) for t in transform_configs.values()]
         return Compose(transforms) if transforms else None
 
+    def get_timing_stats(self):
+        """Return the average timing statistics for each step."""
+        total_samples = self.shared_samples.value
+        if total_samples == 0:
+            return {
+                "total_samples": 0,
+                "average_times": {key: 0.0 for key in self.shared_stats.keys()},
+            }
+
+        avg_stats = {
+            key: val.value / total_samples for key, val in self.shared_stats.items()
+        }
+        return {"total_samples": total_samples, "average_times": avg_stats}
+
     def __getitem__(self, idx):
+        import time
+
+        import torch.utils.data
+
+        start_total = time.perf_counter()
+
         # Handle different types of indices
         if isinstance(idx, (list, tuple, range)):
             indices = idx
@@ -214,14 +254,38 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
 
         # Break down data loading steps
         if self.dataset_type == "huggingface":
+            # Measure HF data fetch time
+            start = time.perf_counter()
             x = self.data[indices]["x"] if is_batch else self.data[idx]["x"]
+            with self.shared_stats["data_fetch"].get_lock():
+                self.shared_stats["data_fetch"].value += time.perf_counter() - start
         else:
+            # Measure mmap data fetch time
+            start = time.perf_counter()
             x = self.data[indices] if is_batch else self.data[idx]
+            with self.shared_stats["data_fetch"].get_lock():
+                self.shared_stats["data_fetch"].value += time.perf_counter() - start
+
+            # Measure copy time
+            start = time.perf_counter()
             x = x.copy()
+            with self.shared_stats["data_copy"].get_lock():
+                self.shared_stats["data_copy"].value += time.perf_counter() - start
+
+            # Measure tensor conversion time
+            start = time.perf_counter()
             x = torch.from_numpy(x)
+            with self.shared_stats["to_tensor"].get_lock():
+                self.shared_stats["to_tensor"].value += time.perf_counter() - start
+
+            # Measure float conversion time
+            start = time.perf_counter()
             x = x.float()
+            with self.shared_stats["to_float"].get_lock():
+                self.shared_stats["to_float"].value += time.perf_counter() - start
 
         # Sample groups using specified strategy
+        start = time.perf_counter()
         if is_batch:
             # For batches, we need to handle each sample
             B = len(indices)  # Batch size
@@ -239,12 +303,19 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
             view1, view2 = sample_groups(
                 x, self.n_samples_per_group, self.sampling_strategy
             )
+        with self.shared_stats["group_sampling"].get_lock():
+            self.shared_stats["group_sampling"].value += time.perf_counter() - start
 
         if self.normalize_data:
+            # Normalize both views
+            start = time.perf_counter()
             view1 = self.normalize(view1)
             view2 = self.normalize(view2)
+            with self.shared_stats["normalization"].get_lock():
+                self.shared_stats["normalization"].value += time.perf_counter() - start
 
         # Apply multi-view transforms that process both views at once
+        start = time.perf_counter()
         if self.multiview_transforms is not None:
             if is_batch:
                 # Apply transforms to each sample in the batch
@@ -253,8 +324,13 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
                     view1[i], view2[i] = self.multiview_transforms([view1[i], view2[i]])
             else:
                 view1, view2 = self.multiview_transforms([view1, view2])
+        with self.shared_stats["multiview_transform"].get_lock():
+            self.shared_stats["multiview_transform"].value += (
+                time.perf_counter() - start
+            )
 
         # Apply view-specific transforms
+        start = time.perf_counter()
         if is_batch:
             # Apply transforms to each sample in the batch
             B = len(indices)
@@ -268,5 +344,16 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
                 view1 = self.view1_transform(view1)
             if self.view2_transform is not None:
                 view2 = self.view2_transform(view2)
+        with self.shared_stats["view_specific_transform"].get_lock():
+            self.shared_stats["view_specific_transform"].value += (
+                time.perf_counter() - start
+            )
+
+        total_time = time.perf_counter() - start_total
+        with self.shared_stats["total_time"].get_lock():
+            self.shared_stats["total_time"].value += total_time
+
+        with self.shared_samples.get_lock():
+            self.shared_samples.value += len(indices)
 
         return [view1, view2]
