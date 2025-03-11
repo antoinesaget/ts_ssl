@@ -34,9 +34,9 @@ def visualize(config):
         plotbeforeandafter(dataset=dataset, sample=config.visualizer.sample, overlay=config.visualizer.overlay, 
                            augmentation=config.augmentations.name, bands=config.visualizer.bands)
     elif func == "plotsingleclass":
-        plotsingleclassexamples(dataset=dataset, classid=config.visualizer.seed)
+        plotsingleclassexamples(dataset=dataset, classid=config.visualizer.classid, shuffle_seed=config.visualizer.seed)
     elif func == "plotmulticlass":
-        plotmulticlassexamples(dataset=dataset, augmentation=config.augmentations, shuffle_seed=config.visualizer.seed)
+        plotmulticlassexamples(dataset=dataset, shuffle_seed=config.visualizer.seed)
 
 def plotdata(dataset: Dataset) -> None:
     '''
@@ -194,8 +194,10 @@ def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     logging.getLogger(__name__).info("Selecting example from each class")
     # Filter set with condition input label == classid
     filtered_set = dataset.data.filter(lambda x: x["y"] == torch.tensor(classid))
+    print(len(filtered_set))
     # Shuffle set and choose first sample (feature shape (100,60,12))
-    samples = filtered_set.shuffle(shuffle_seed)[0]
+    samples = filtered_set.shuffle(seed=shuffle_seed)[0]
+    print(len(samples))
     return samples
 
 # masking, resampling, resizing, combination, jittering
