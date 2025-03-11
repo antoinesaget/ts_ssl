@@ -5,11 +5,11 @@ defaults:
   - _self_
 
 visualizer:
-  sample: 0
+  sample: None
   overlay: true
   classid: 0
   bands: []
-  seed: 2025
+  seed: None
   function: "plotbeforeandafter"
 
 training:

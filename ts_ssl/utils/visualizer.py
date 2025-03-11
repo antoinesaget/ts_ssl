@@ -30,13 +30,14 @@ def visualize(config):
     )
 
     func = config.visualizer.function
+    seed = config.visualizer.seed if config.visualizer.seed != "None" else None
     if func == "plotbeforeandafter":
         plotbeforeandafter(dataset=dataset, sample=config.visualizer.sample, overlay=config.visualizer.overlay, 
                            augmentation=config.augmentations.name, bands=config.visualizer.bands)
     elif func == "plotsingleclass":
-        plotsingleclassexamples(dataset=dataset, classid=config.visualizer.classid, shuffle_seed=config.visualizer.seed)
+        plotsingleclassexamples(dataset=dataset, classid=config.visualizer.classid, shuffle_seed=seed)
     elif func == "plotmulticlass":
-        plotmulticlassexamples(dataset=dataset, shuffle_seed=config.visualizer.seed)
+        plotmulticlassexamples(dataset=dataset, shuffle_seed=seed)
 
 def plotdata(dataset: Dataset) -> None:
     '''
@@ -137,10 +138,25 @@ def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
 def _getmulticlassexamples(dataset: Dataset, shuffle_seed = None):
     '''Helper function to obtain a sample from each class of a dataset. Returns list of same length as number of classes in the dataset'''
     logging.getLogger(__name__).info("Selecting example from each class")
-    samples = []
-    for classnum in range(20):
-        filtered_set = dataset.data.filter(lambda x: x["y"] == torch.tensor(classnum))
-        samples.append(filtered_set.shuffle(seed=shuffle_seed)[0])
+    # Init list of len = 20 with None values
+    samples = [None]*20
+    # Shuffle set
+    shuffled_set = dataset.data.shuffle(seed=shuffle_seed)
+    # Iterate over shuffled set
+    for sample in shuffled_set:
+        # Get sample class
+        classid = int(sample["y"].item())
+        # If matching index in samples list is not filled, fill it
+        if samples[classid] is None:
+            samples[classid] = sample
+            #print("Unfound class {classid} found")
+            if samples.count(None) == 0:
+                break
+        # If matching index in samples list is filled, continue looking for unfilled classes
+        else:
+            #print(f"Class {classid} already found")
+            continue
+
     return samples
 
 def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = None) -> None:
@@ -191,12 +207,20 @@ def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
 
 def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = None):
     '''Helper function to return one sample of specified class, with feature shape (100, 60, 12)'''
-    logging.getLogger(__name__).info("Selecting example from each class")
-    # Filter set with condition input label == classid
-    filtered_set = dataset.data.filter(lambda x: x["y"] == torch.tensor(classid))
-    print(len(filtered_set))
-    # Shuffle set and choose first sample (feature shape (100,60,12))
-    samples = filtered_set.shuffle(seed=shuffle_seed)[0]
+    logging.getLogger(__name__).info("Selecting example from specified class")
+    # Init object to be returned
+    samples = None
+    # Shuffle set
+    shuffled_set = dataset.data.shuffle(seed=shuffle_seed)
+    # Iterate over shuffled set
+    idx = 0
+    while samples is None:
+        # If sample from dataset matches target class, set sample to be returned and break loop
+        sampleclassid = int(shuffled_set[idx]["y"].item())
+        if sampleclassid == classid:
+            samples = shuffled_set[idx]
+        idx += 1
+
     return samples
 
 # masking, resampling, resizing, combination, jittering
@@ -220,6 +244,8 @@ def plotbeforeandafter(dataset: Dataset, sample: int = 0, augmentation: str = "a
     # Initialize bands to be displayed
     if not bands:
         bands = [x for x in list(range(12))]
+    if sample == "None":
+        sample = int(torch.randint(high=len(dataset), size=(1,)))
 
     # Sample of one time series (len=60)
     sample_before = dataset.data[sample]["x"][0].tolist()   # HFDataset format
