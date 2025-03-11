@@ -1,0 +1,20 @@
+name: resampling
+views_sampling_strategy: "group"
+
+multiview_transforms:
+  resampling:
+    _target_: ts_ssl.data.augmentations.ResamplingAugmentation
+    upsampling_factor: 2.0
+    subsequence_length_ratio: 0.25
+
+view1:
+  transforms:
+    jittering:
+      _target_: ts_ssl.data.augmentations.Jittering
+      sigma: 0.01
+
+view2:
+  transforms:
+    jittering:
+      _target_: ts_ssl.data.augmentations.Jittering
+      sigma: 0.01 
