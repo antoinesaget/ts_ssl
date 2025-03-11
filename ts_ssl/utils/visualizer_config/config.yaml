@@ -7,7 +7,7 @@ defaults:
 visualizer:
   sample: 0
   overlay: true
-  classid: 1
+  classid: 0
   bands: []
   seed: 2025
   function: "plotbeforeandafter"

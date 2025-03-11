@@ -197,7 +197,6 @@ def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     print(len(filtered_set))
     # Shuffle set and choose first sample (feature shape (100,60,12))
     samples = filtered_set.shuffle(seed=shuffle_seed)[0]
-    print(len(samples))
     return samples
 
 # masking, resampling, resizing, combination, jittering
