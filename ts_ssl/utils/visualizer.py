@@ -8,17 +8,18 @@ from torch.utils.data import Dataset
 from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 
 # To use, run "python visualizer.py"
-# Config defaults in utils/visualizer_config/config.yaml
+# Config defaults in ts_ssl/config/visualizer.yaml
 # config.visualizer.function values:
 #       - "plotbeforeandafter": plots one sample specified by config.visualizer.sample, before and after data augmentations are applied
 #       - "plotsingleclass": plots one random sample of class specified by config.visualizer.classid (0-19)
 #       - "plotmulticlass": plots one random sample per class in dataset (20 total)
 
-@hydra.main(config_path="visualizer_config", config_name="config", version_base="1.3")
+@hydra.main(config_path="../config", config_name="config", version_base="1.3")
 def visualize(config):
     logger = logging.getLogger(__name__)
     # Initialize datasets and dataloaders
     logger.info("Loading dataset")
+    
     dataset = SSLGroupedTimeSeriesDataset(
         data=config.dataset.ssl_data,
         n_samples_per_group=config.training.n_samples_per_group,
@@ -244,7 +245,7 @@ def plotbeforeandafter(dataset: Dataset, sample: int = 0, augmentation: str = "a
     # Initialize bands to be displayed
     if not bands:
         bands = [x for x in list(range(12))]
-    if sample == "None":
+    if not sample:
         sample = int(torch.randint(high=len(dataset), size=(1,)))
 
     # Sample of one time series (len=60)

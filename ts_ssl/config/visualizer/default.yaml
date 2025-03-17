@@ -1,0 +1,7 @@
+# Visualizer configuration
+sample: null
+overlay: false
+classid: 0
+bands: []
+seed: None
+function: "plotbeforeandafter" 
