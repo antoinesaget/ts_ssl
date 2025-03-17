@@ -1,0 +1,11 @@
+- dataset=francecrops_nano
+- training.max_examples_seen=10000
+- training.val_check_interval=100
+- post_training_eval=true
+- model.encoder.n_filters=64
+- model.encoder.embedding_dim=128
+- training.batch_size=64
+- num_workers=8
+- validation.samples_per_class=[5,10]
+- eval.samples_per_class=[5,10]
+- device=cpu
