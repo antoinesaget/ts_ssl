@@ -1,0 +1,17 @@
+name: francecrops_20k_mmap
+dataset_type: mmap_ninja
+
+ssl_data: ${location.base_path}/${dataset.name}/contrast
+validation_data: ${location.base_path}/${dataset.name}/validation
+train_data: ${location.base_path}/${dataset.name}/train
+test_data: ${location.base_path}/${dataset.name}/test
+
+percentiles: [
+  [105.0, 192.0, 388.0, 240.0, 664.0, 1257.0, 1393.0, 1438.0, 1524.0, 1638.0, 1183.0, 569.0],
+  [1272.0, 1543.0, 2008.0, 2617.0, 3022.0, 4322.0, 5217.0, 5451.0, 5438.0, 5377.0, 4546.0, 3611.0]
+]
+
+normalize: true
+n_channels: 12
+group_size: 100
+n_timesteps: 60
