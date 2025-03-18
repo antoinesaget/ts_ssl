@@ -4,8 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import torch
 import hydra
-from torch.utils.data import Dataset
-from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
+from torch.utils.data import Dataset, DataLoader
+from numpy import memmap, random
+import numpy
+from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset, SupervisedGroupedTimeSeriesDataset
 
 # To use, run "python visualizer.py"
 # Config defaults in ts_ssl/config/visualizer.yaml
@@ -17,28 +19,44 @@ from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 @hydra.main(config_path="../config", config_name="config", version_base="1.3")
 def visualize(config):
     logger = logging.getLogger(__name__)
-    # Initialize datasets and dataloaders
-    logger.info("Loading dataset")
-    
-    dataset = SSLGroupedTimeSeriesDataset(
-        data=config.dataset.ssl_data,
-        n_samples_per_group=config.training.n_samples_per_group,
-        percentiles=config.dataset.percentiles,
-        config=config.augmentations,
-        logger=logger,
-        normalize_data=config.dataset.normalize,
-        dataset_type=config.dataset.dataset_type,
-    )
 
     func = config.visualizer.function
     seed = config.visualizer.seed if config.visualizer.seed != "None" else None
+    # Determine function to use; initialize dataset appropriately (SSL for beforeandafter, Supervised otherwise)
     if func == "plotbeforeandafter":
+        logger.info("Loading dataset")
+        dataset = SSLGroupedTimeSeriesDataset(
+            data=config.dataset.ssl_data,
+            n_samples_per_group=config.training.n_samples_per_group,
+            percentiles=config.dataset.percentiles,
+            config=config.augmentations,
+            logger=logger,
+            normalize_data=config.dataset.normalize,
+            dataset_type=config.dataset.dataset_type,
+        )
         plotbeforeandafter(dataset=dataset, sample=config.visualizer.sample, overlay=config.visualizer.overlay, 
                            augmentation=config.augmentations.name, bands=config.visualizer.bands)
     elif func == "plotsingleclass":
+        logger.info("Loading dataset")
+        dataset = SupervisedGroupedTimeSeriesDataset(
+            data=config.dataset.validation_data,
+            percentiles=config.dataset.percentiles,
+            logger=logger,
+            normalize_data=config.dataset.normalize,
+            dataset_type=config.dataset.dataset_type,
+        )
         plotsingleclassexamples(dataset=dataset, classid=config.visualizer.classid, shuffle_seed=seed)
     elif func == "plotmulticlass":
+        logger.info("Loading dataset")
+        dataset = SupervisedGroupedTimeSeriesDataset(
+            data=config.dataset.validation_data,
+            percentiles=config.dataset.percentiles,
+            logger=logger,
+            normalize_data=config.dataset.normalize,
+            dataset_type=config.dataset.dataset_type,
+        )
         plotmulticlassexamples(dataset=dataset, shuffle_seed=seed)
+
 
 def plotdata(dataset: Dataset) -> None:
     '''
@@ -112,9 +130,13 @@ def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
 
     # For each class sample in list of samples
     for sample in samples:
-        # Access x and y features
-        x = sample["x"][0].tolist()
-        y = sample["y"].tolist()
+        if dataset.dataset_type == "huggingface":
+            # Access x and y features
+            x = sample["x"][0].tolist()
+            y = sample["y"].tolist()
+        else:
+            x = sample[0][0][0] # (2, 1, 100)
+            y = sample[1]
 
         # Allign spectral band measurements appropriately
         spectral_bands=[list(indices) for indices in zip(*x)]
@@ -141,22 +163,35 @@ def _getmulticlassexamples(dataset: Dataset, shuffle_seed = None):
     logging.getLogger(__name__).info("Selecting example from each class")
     # Init list of len = 20 with None values
     samples = [None]*20
-    # Shuffle set
-    shuffled_set = dataset.data.shuffle(seed=shuffle_seed)
-    # Iterate over shuffled set
-    for sample in shuffled_set:
-        # Get sample class
-        classid = int(sample["y"].item())
-        # If matching index in samples list is not filled, fill it
-        if samples[classid] is None:
-            samples[classid] = sample
-            #print("Unfound class {classid} found")
-            if samples.count(None) == 0:
-                break
-        # If matching index in samples list is filled, continue looking for unfilled classes
-        else:
-            #print(f"Class {classid} already found")
-            continue
+
+    if dataset.dataset_type == "huggingface":
+        # Shuffle set
+        shuffled_set = dataset.dataset.shuffle(seed=shuffle_seed)
+        # Iterate over shuffled set
+        for sample in shuffled_set:
+            # Get sample class
+            classid = int(sample["y"].item())
+            # If matching index in samples list is not filled, fill it
+            if samples[classid] is None:
+                samples[classid] = sample
+                #print("Unfound class {classid} found")
+                if samples.count(None) == 0:
+                    break
+            # If matching index in samples list is filled, continue looking for unfilled classes
+            else:
+                #print(f"Class {classid} already found")
+                continue
+    else: # mmap_ninja
+        # Create sampler to shuffle mmap data
+        sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
+        # Iterate until 10 samples of same class are found
+        while samples.count(None) != 0:
+            # Access next sample
+            sample = next(sampler)
+            # Get samples class id
+            classid = int(sample[1][1])
+            if samples[classid] == None:
+                samples[classid] = sample[1]
 
     return samples
 
@@ -172,8 +207,11 @@ def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     Returns:
         None
     '''
-    # Get sample of specified class, get the first 20 timeseries from the features
-    samples = _getsingleclassexamples(dataset, classid, shuffle_seed=shuffle_seed)["x"][0:10]
+    # Get samples of specified class, get the timeseries data from each
+    if dataset.dataset_type == "huggingface":
+        samples = [sample["x"][0] for sample in _getsingleclassexamples(dataset, classid, shuffle_seed=shuffle_seed)]
+    else:
+        samples = [sample[0][0][0] for sample in _getsingleclassexamples(dataset, classid, shuffle_seed)]
     temporal_dim = list(range(60))
 
     # Create 5x4 subplot figure and init row and col indexes
@@ -207,20 +245,34 @@ def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     return
 
 def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = None):
-    '''Helper function to return one sample of specified class, with feature shape (100, 60, 12)'''
-    logging.getLogger(__name__).info("Selecting example from specified class")
-    # Init object to be returned
-    samples = None
-    # Shuffle set
-    shuffled_set = dataset.data.shuffle(seed=shuffle_seed)
-    # Iterate over shuffled set
-    idx = 0
-    while samples is None:
-        # If sample from dataset matches target class, set sample to be returned and break loop
-        sampleclassid = int(shuffled_set[idx]["y"].item())
-        if sampleclassid == classid:
-            samples = shuffled_set[idx]
-        idx += 1
+    '''
+    Helper function to return ten samples of specified class, each with feature shape dependant on dataset type.
+    If huggingface -> (); if mmap_ninja -> 
+    '''
+    logging.getLogger(__name__).info("Selecting examples from specified class")
+    # Init list to be returned
+    samples = []
+    
+    if dataset.dataset_type =="huggingface":
+        # Shuffle set
+        shuffled_set = dataset.dataset.shuffle(seed=shuffle_seed)
+        idx = 0
+        # Iterate over shuffled set
+        while len(samples) < 10:
+            # If sample from dataset matches target class, set sample to be returned and break loop
+            sampleclassid = int(shuffled_set[idx]["y"].item())
+            if sampleclassid == classid:
+                samples.append(shuffled_set[idx])
+            idx += 1
+    else:
+        # Create sampler to shuffle mmap data
+        sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
+        # Iterate until 10 samples of same class are found
+        while len(samples) < 10:
+            sample = next(sampler)
+            sampleclassid = int(sample[1][1])
+            if sampleclassid == classid:
+                samples.append(sample[1])
 
     return samples
 
@@ -249,7 +301,10 @@ def plotbeforeandafter(dataset: Dataset, sample: int = 0, augmentation: str = "a
         sample = int(torch.randint(high=len(dataset), size=(1,)))
 
     # Sample of one time series (len=60)
-    sample_before = dataset.data[sample]["x"][0].tolist()   # HFDataset format
+    if dataset.dataset_type == "huggingface":
+        sample_before = dataset.data[sample]["x"][0].tolist()   # HFDataset format
+    else:
+        sample_before = dataset.data[sample][0].tolist()
     sample_after = dataset[sample][0][0].tolist()   # Pytorch Dataset  
 
     # List [0,..., 59], time points

@@ -123,7 +123,8 @@ class SupervisedGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
             y = torch.tensor(self.labels[idx])
 
         # Normalize the data
-        x = self.normalize(x)
+        if self.normalize_data:
+            x = self.normalize(x)
 
         # Apply additional transforms if specified
         if self.transform is not None:
