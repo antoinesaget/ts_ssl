@@ -14,7 +14,7 @@ from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 #       - "plotsingleclass": plots one random sample of class specified by config.visualizer.classid (0-19)
 #       - "plotmulticlass": plots one random sample per class in dataset (20 total)
 
-@hydra.main(config_path="visualizer_config", config_name="config", version_base="1.3")
+@hydra.main(config_path="util_config", config_name="config", version_base="1.3")
 def visualize(config):
     logger = logging.getLogger(__name__)
     # Initialize datasets and dataloaders

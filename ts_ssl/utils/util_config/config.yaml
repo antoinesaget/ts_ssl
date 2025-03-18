@@ -5,13 +5,17 @@ defaults:
   - _self_
 
 visualizer:
-  sample: None
+  sample: None # positive int 
   overlay: true
-  classid: 0
+  classid: 0 # [0,19]
   bands: []
-  seed: None
+  seed: None # positive int
   function: "plotbeforeandafter"
 
 training:
   n_samples_per_group: 4
+  batch_size: 1024
+  num_workers: 4
+  iterations: 1
+
   
