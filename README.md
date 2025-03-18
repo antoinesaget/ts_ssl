@@ -102,6 +102,7 @@ python ts_ssl/train.py \
     "eval.samples_per_class=[5,10]" \
     device=cuda
 ```
+
 Low-end GPU (4GB RAM) test:
 ```bash
 python ts_ssl/train.py \
