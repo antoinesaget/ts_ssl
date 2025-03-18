@@ -12,11 +12,11 @@ from torch.utils.data import Dataset, DataLoader
 from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 
 
-@hydra.main(config_path="util_config", config_name="config", version_base="1.3")
+@hydra.main(config_path="../config", config_name="config", version_base="1.3")
 def main(config):
     # Get config parameters
     data = config.dataset.ssl_data
-    iterations = config.training.iterations
+    iterations = config.loaddatautil.iterations
     # Load datasets
     dataset_arrow = load_dataset(path=data["path"], split=data["split"]).with_format(
         "torch", columns=["x", "y"], dtype=torch.float16)
@@ -31,8 +31,8 @@ def main(config):
     )
 
     # Make dataloaders
-    loader_arrow = DataLoader(dataset=dataset_arrow, batch_size=config.training.batch_size, num_workers=config.training.num_workers)
-    loader_SSL = DataLoader(dataset=dataset_SSL,batch_size=config.training.batch_size, num_workers=config.training.num_workers)
+    loader_arrow = DataLoader(dataset=dataset_arrow, batch_size=config.training.batch_size, num_workers=config.num_workers)
+    loader_SSL = DataLoader(dataset=dataset_SSL,batch_size=config.training.batch_size, num_workers=config.num_workers)
 
     # Time iterations of traversing datasets
     data_arrow = time_runs(loader_arrow, iterations)
@@ -71,12 +71,12 @@ def time_runs(loader: DataLoader, num_times: int):
     stats_stream = io.StringIO()
 
     # Using a profiler, iterate through the dataset <num_times> times
-    with tqdm(total=(num_times*len(loader))) as pbar:
-        with cProfile.Profile() as pr:
-            for iteration in range(num_times):
-                for item in loader:
-                    len(item)
-                    pbar.update(1)
+    #with tqdm(total=(num_times*len(loader))) as pbar:       <- undecided on usage
+    with cProfile.Profile() as pr:
+        for iteration in range(num_times):
+            for item in loader:
+                len(item)
+                    #pbar.update(1)
 
     # Obtain the profiler stats, format, and print to IO 
     profile_stats = pstats.Stats(pr, stream=stats_stream).sort_stats("cumulative")
@@ -87,6 +87,7 @@ def time_runs(loader: DataLoader, num_times: int):
     
     return type(loader.dataset), num_times, pr
 
+
 def present_stats(stats: StatsProfile):
     log = logging.getLogger(__name__)
     log.info(f"{stats.total_tt}")
@@ -96,6 +97,7 @@ def present_stats(stats: StatsProfile):
         log.info(f"{key[:10] + "..." if len(key) > 10 else key + " " * (13-len(key))}: {val.cumtime}")
 
     return
+
 
 def compare_runs(run1: tuple[str, int, Profile], run2: tuple[str, int, Profile]):
     template = """----------------Iteration Speed Comparision----------------
