@@ -70,16 +70,20 @@ def plotdata(dataset: Dataset) -> None:
     '''
     # sample of one time series (len=60)
     sample = dataset[0][0][0].tolist()
+
     # List [0,..., 59], time points
     temporal_dim = list(range(len(sample)))
+
     # Sort values of same spectral bands into 2d list shape (12, 60); Method found on GeeksforGeeks "Group Elements at Same Indices in a Multi-List"
     spectral_bands=[list(indices) for indices in zip(*sample)]
+    
     # Add each band to the plot
     for idx in range(12):
         plt.plot(temporal_dim, spectral_bands[idx], label=f"Band {idx}")
     plt.legend()
     plt.show()
     return
+
 
 def plotdata(datasets: list[Dataset]) -> None:
     '''
@@ -95,18 +99,23 @@ def plotdata(datasets: list[Dataset]) -> None:
     for dataset_idx in range(len(datasets)):
         # Get individual dataset from list argument 
         dataset = datasets[dataset_idx]
+
         # Sample of one time series (len=60)
         sample = dataset[0]["x"][0].tolist() # HuggingFace dataset
+
         # List [0,..., 59], time points
         temporal_dim = list(range(len(sample)))
+
         # Sort values of same spectral bands into 2d list shape (12, 60); Method found on GeeksforGeeks "Group Elements at Same Indices in a Multi-List"
         spectral_bands=[list(indices) for indices in zip(*sample)]
+
         # Add each band to the plot
         for idx in range(12):
             axes[dataset_idx].plot(temporal_dim, spectral_bands[idx], label=f"Band {idx}")
     plt.legend()
     plt.show()
     return
+
 
 def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
     '''
@@ -158,6 +167,7 @@ def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
     plt.show()
     return
 
+
 def _getmulticlassexamples(dataset: Dataset, shuffle_seed = None):
     '''Helper function to obtain a sample from each class of a dataset. Returns list of same length as number of classes in the dataset'''
     logging.getLogger(__name__).info("Selecting example from each class")
@@ -167,33 +177,37 @@ def _getmulticlassexamples(dataset: Dataset, shuffle_seed = None):
     if dataset.dataset_type == "huggingface":
         # Shuffle set
         shuffled_set = dataset.dataset.shuffle(seed=shuffle_seed)
+
         # Iterate over shuffled set
         for sample in shuffled_set:
+
             # Get sample class
             classid = int(sample["y"].item())
+
             # If matching index in samples list is not filled, fill it
             if samples[classid] is None:
                 samples[classid] = sample
+
                 #print("Unfound class {classid} found")
                 if samples.count(None) == 0:
                     break
-            # If matching index in samples list is filled, continue looking for unfilled classes
-            else:
-                #print(f"Class {classid} already found")
-                continue
     else: # mmap_ninja
         # Create sampler to shuffle mmap data
         sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
+
         # Iterate until 10 samples of same class are found
         while samples.count(None) != 0:
+
             # Access next sample
             sample = next(sampler)
+
             # Get samples class id
             classid = int(sample[1][1])
             if samples[classid] == None:
                 samples[classid] = sample[1]
 
     return samples
+
 
 def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = None) -> None:
     '''
@@ -222,6 +236,7 @@ def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
 
     # For each class sample in list of samples
     for sample in samples:
+
         # Access x and y features
         x = sample.tolist()
 
@@ -244,11 +259,9 @@ def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     plt.show()
     return
 
+
 def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = None):
-    '''
-    Helper function to return ten samples of specified class, each with feature shape dependant on dataset type.
-    If huggingface -> (); if mmap_ninja -> 
-    '''
+    '''Helper function to return ten samples of specified class, each with feature shape dependant on dataset type.'''
     logging.getLogger(__name__).info("Selecting examples from specified class")
     # Init list to be returned
     samples = []
@@ -257,8 +270,10 @@ def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
         # Shuffle set
         shuffled_set = dataset.dataset.shuffle(seed=shuffle_seed)
         idx = 0
+
         # Iterate over shuffled set
         while len(samples) < 10:
+
             # If sample from dataset matches target class, set sample to be returned and break loop
             sampleclassid = int(shuffled_set[idx]["y"].item())
             if sampleclassid == classid:
@@ -267,6 +282,7 @@ def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     else:
         # Create sampler to shuffle mmap data
         sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
+
         # Iterate until 10 samples of same class are found
         while len(samples) < 10:
             sample = next(sampler)
@@ -275,6 +291,7 @@ def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
                 samples.append(sample[1])
 
     return samples
+
 
 # masking, resampling, resizing, combination, jittering
 def plotbeforeandafter(dataset: Dataset, sample: int = 0, augmentation: str = "augmentation", overlay: bool = True, 
@@ -352,6 +369,7 @@ def plotbeforeandafter(dataset: Dataset, sample: int = 0, augmentation: str = "a
 
     plt.show()
     return
+
 
 if __name__ == "__main__":
     visualize()
