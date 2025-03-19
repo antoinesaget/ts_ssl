@@ -139,13 +139,8 @@ def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
 
     # For each class sample in list of samples
     for sample in samples:
-        if dataset.dataset_type == "huggingface":
-            # Access x and y features
-            x = sample["x"][0].tolist()
-            y = sample["y"].tolist()
-        else:
-            x = sample[0][0][0] # (2, 1, 100)
-            y = sample[1]
+        x = sample[0][0][0] # (2, 1, 100)
+        y = sample[1]
 
         # Allign spectral band measurements appropriately
         spectral_bands=[list(indices) for indices in zip(*x)]
@@ -174,37 +169,19 @@ def _getmulticlassexamples(dataset: Dataset, shuffle_seed = None):
     # Init list of len = 20 with None values
     samples = [None]*20
 
-    if dataset.dataset_type == "huggingface":
-        # Shuffle set
-        shuffled_set = dataset.dataset.shuffle(seed=shuffle_seed)
+    # Create sampler to shuffle data
+    sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
 
-        # Iterate over shuffled set
-        for sample in shuffled_set:
+    # Iterate until 10 samples of same class are found
+    while samples.count(None) != 0:
 
-            # Get sample class
-            classid = int(sample["y"].item())
+        # Access next sample
+        sample = next(sampler)
 
-            # If matching index in samples list is not filled, fill it
-            if samples[classid] is None:
-                samples[classid] = sample
-
-                #print("Unfound class {classid} found")
-                if samples.count(None) == 0:
-                    break
-    else: # mmap_ninja
-        # Create sampler to shuffle mmap data
-        sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
-
-        # Iterate until 10 samples of same class are found
-        while samples.count(None) != 0:
-
-            # Access next sample
-            sample = next(sampler)
-
-            # Get samples class id
-            classid = int(sample[1][1])
-            if samples[classid] == None:
-                samples[classid] = sample[1]
+        # Get samples class id
+        classid = int(sample[1][1])
+        if samples[classid] == None:
+            samples[classid] = sample[1]
 
     return samples
 
@@ -222,10 +199,7 @@ def plotsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
         None
     '''
     # Get samples of specified class, get the timeseries data from each
-    if dataset.dataset_type == "huggingface":
-        samples = [sample["x"][0] for sample in _getsingleclassexamples(dataset, classid, shuffle_seed=shuffle_seed)]
-    else:
-        samples = [sample[0][0][0] for sample in _getsingleclassexamples(dataset, classid, shuffle_seed)]
+    samples = [sample[0][0][0] for sample in _getsingleclassexamples(dataset, classid, shuffle_seed)]
     temporal_dim = list(range(60))
 
     # Create 5x4 subplot figure and init row and col indexes
@@ -266,29 +240,15 @@ def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = 
     # Init list to be returned
     samples = []
     
-    if dataset.dataset_type =="huggingface":
-        # Shuffle set
-        shuffled_set = dataset.dataset.shuffle(seed=shuffle_seed)
-        idx = 0
+    # Create sampler to shuffle mmap data
+    sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
 
-        # Iterate over shuffled set
-        while len(samples) < 10:
-
-            # If sample from dataset matches target class, set sample to be returned and break loop
-            sampleclassid = int(shuffled_set[idx]["y"].item())
-            if sampleclassid == classid:
-                samples.append(shuffled_set[idx])
-            idx += 1
-    else:
-        # Create sampler to shuffle mmap data
-        sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
-
-        # Iterate until 10 samples of same class are found
-        while len(samples) < 10:
-            sample = next(sampler)
-            sampleclassid = int(sample[1][1])
-            if sampleclassid == classid:
-                samples.append(sample[1])
+    # Iterate until 10 samples of same class are found
+    while len(samples) < 10:
+        sample = next(sampler)
+        sampleclassid = int(sample[1][1])
+        if sampleclassid == classid:
+            samples.append(sample[1])
 
     return samples
 
@@ -318,11 +278,8 @@ def plotbeforeandafter(dataset: Dataset, sample: int = 0, augmentation: str = "a
         sample = int(torch.randint(high=len(dataset), size=(1,)))
 
     # Sample of one time series (len=60)
-    if dataset.dataset_type == "huggingface":
-        sample_before = dataset.data[sample]["x"][0].tolist()   # HFDataset format
-    else:
-        sample_before = dataset.data[sample][0].tolist()
-    sample_after = dataset[sample][0][0].tolist()   # Pytorch Dataset  
+    sample_before = dataset.get_raw_item(sample)[0][0].tolist()
+    sample_after = dataset[sample][0][0].tolist()
 
     # List [0,..., 59], time points
     temporal_dim = list(range(len(sample_before)))
