@@ -14,69 +14,78 @@ from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 
 @hydra.main(config_path="../config", config_name="config", version_base="1.3")
 def main(config):
-    # Get config parameters
-    data = config.dataset.ssl_data
-    iterations = config.loaddatautil.iterations
-    # Load datasets
-    dataset_arrow = load_dataset(path=data["path"], split=data["split"]).with_format(
-        "torch", columns=["x", "y"], dtype=torch.float16)
-    
-    dataset_SSL = SSLGroupedTimeSeriesDataset(
-        data=config.dataset.ssl_data,
+    logger = logging.getLogger(__name__)
+
+    run_arrow_mmap(config, logger)
+
+    logger.info(f"Log file may be found at {config.output_dir}")
+
+
+def run_arrow_mmap(config, logger = None):
+    # Get logger if not provided
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    # Access configs for each
+    arrow_cfg = config.loaddatautil.arrow
+    mmap_cfg = config.loaddatautil.mmap
+
+    # Create dataset objects
+    dataset_arrow = SSLGroupedTimeSeriesDataset(
+        data=arrow_cfg.ssl_data,
         n_samples_per_group=config.training.n_samples_per_group,
-        percentiles=config.dataset.percentiles,
+        percentiles=arrow_cfg.percentiles,
         config=config.augmentations,
-        normalize_data=config.dataset.normalize,
-        dataset_type=config.dataset.dataset_type,
-    )
+        normalize_data=arrow_cfg.normalize,
+        dataset_type=arrow_cfg.dataset_type,
+        )
+    dataset_mmap = SSLGroupedTimeSeriesDataset(
+        data=mmap_cfg.ssl_data,
+        n_samples_per_group=config.training.n_samples_per_group,
+        percentiles=mmap_cfg.percentiles,
+        config=config.augmentations,
+        normalize_data=mmap_cfg.normalize,
+        dataset_type=mmap_cfg.dataset_type,
+        )
+    
+    # Create dataloader objects
+    dataloader_arrow = DataLoader(dataset=dataset_arrow, batch_size=config.training.batch_size, num_workers=config.num_workers)
+    dataloader_mmap = DataLoader(dataset=dataset_mmap, batch_size=config.training.batch_size, num_workers=config.num_workers)
 
-    # Make dataloaders
-    loader_arrow = DataLoader(dataset=dataset_arrow, batch_size=config.training.batch_size, num_workers=config.num_workers)
-    loader_SSL = DataLoader(dataset=dataset_SSL,batch_size=config.training.batch_size, num_workers=config.num_workers)
+    # Time runs
+    logger.info("Timing arrow (huggingface) type dataset")
+    data_arrow = time_runs(dataloader_arrow, config.loaddatautil.iterations)
+    logger.info("Timing mmap type dataset")
+    data_mmap = time_runs(dataloader_mmap, config.loaddatautil.iterations)
 
-    # Time iterations of traversing datasets
-    data_arrow = time_runs(loader_arrow, iterations)
-    data_SSL = time_runs(loader_SSL, iterations)
+    # Compare data
+    compare(config, data_arrow, data_mmap)
 
-    #logging.getLogger(__name__).info(f"data_arrow: {type(data_arrow[2].func_profiles.values())}")
-    compare_runs(data_arrow, data_SSL)
-
-
-def iterate_dataset(dataset: Dataset, batch_size: int, num_workers: int):
-    '''
-    Creates a DataLoader instance and iterates through the dataset with given parameters
-    '''
-    loader = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=num_workers)
-    for item in loader:
-        len(item)
-
-
-def iterate_dataset(loader: DataLoader):
-    '''
-    Takes a DataLoader instance and iterates through the dataset with given parameters
-    '''
-    for item in loader:
-        len(item["x"])
+    return
 
 
 def time_runs(loader: DataLoader, num_times: int):
     '''
-    Iterates through an entire dataset using DataLoader <num_int> number of times. Timed using cProfile; statistics logged after iterations;
+    Iterates through an entire dataset using DataLoader <num_times> number of times. Timed using cProfile; returns pstats data from cProfile
+
+    Arguments:
+        loader: pytorch DataLoader
+        num_times: integer number of iterations
 
     Returns:
-        - Tuple = (dataset type, num_times, StatsProfile of run)
+        Tuple = (dataset type, num_times, StatsProfile of run)
     '''
     # Get logger and IO to store profile stats
     log = logging.getLogger(__name__)
     stats_stream = io.StringIO()
 
     # Using a profiler, iterate through the dataset <num_times> times
-    #with tqdm(total=(num_times*len(loader))) as pbar:       <- undecided on usage
-    with cProfile.Profile() as pr:
-        for iteration in range(num_times):
-            for item in loader:
-                len(item)
-                    #pbar.update(1)
+    with tqdm(total=(num_times*len(loader))) as pbar:    #   <- undecided on usage
+        with cProfile.Profile() as pr:
+            for iteration in range(num_times):
+                for item in loader:
+                    len(item)
+                    pbar.update(1)
 
     # Obtain the profiler stats, format, and print to IO 
     profile_stats = pstats.Stats(pr, stream=stats_stream).sort_stats("cumulative")
@@ -85,7 +94,7 @@ def time_runs(loader: DataLoader, num_times: int):
     # Use IO to print stats to logger
     #log.info(f"Iterated {num_times} time(s) through dataset of size {len(loader.dataset)} with a batch size of {loader.batch_size} and {loader.num_workers} worker(s): \n\n{stats_stream.getvalue()}")
     
-    return type(loader.dataset), num_times, pr
+    return loader.dataset, pr
 
 
 def present_stats(stats: StatsProfile):
@@ -95,53 +104,110 @@ def present_stats(stats: StatsProfile):
     sorted_list = sorted(stats.func_profiles.items(), key=lambda x: x[1].cumtime, reverse=True)
     for key, val in sorted_list[:10]:
         log.info(f"{key[:10] + "..." if len(key) > 10 else key + " " * (13-len(key))}: {val.cumtime}")
-
     return
 
 
-def compare_runs(run1: tuple[str, int, Profile], run2: tuple[str, int, Profile]):
-    template = """----------------Iteration Speed Comparision----------------
-          {r1name:.23}  | {r2name:.21}
-Iterations: {r1iter:>21}  |{r2iter:>21}
-Total Time: {r1time:>21}s |{r2time:>21}s
-Time/Iter:  {r1avg:>21}s |{r2avg:>21}s
-Longest Functions:
-            {r1lgst:<15}{r1lgsttime:>6}s | {r2lgst:<15}{r2lgsttime:>6}s
-    """
+def compare(config, *profiles: tuple[Dataset, Profile]):
+    '''
+    Compares up to three runs from time_runs(); prints information to log in readable form.
+
+    Arguments:
+        *profiles: array of tuples in format (pytorch Dataset, integer, cProfile Profile object)
     
-    storage = io.StringIO()
-    r1stats = pstats.Stats(run1[2], stream=storage).get_stats_profile()
-    r2stats = pstats.Stats(run2[2], stream=storage).get_stats_profile()
+    Returns:
+        None: Prints data to log
+    '''
+    if len(profiles) > 3:
+        raise ValueError("More than three profiles not supported")
 
-    r1type, r2type = str(run1[0]),str(run2[0])
-    storage.write(f"------Comparing datasets of types {r1type[:25] + ".." if len(r1type) > 25 else r1type} and {r2type[:25] + ".." if len(r2type) > 25 else r2type}------\n")
-    r1_functions_sorted, r2_functions_sorted = sorted(r1stats.func_profiles.items(), key=lambda x: x[1].cumtime,
-                                                          reverse=True), sorted(r2stats.func_profiles.items(), key=lambda x: x[1].cumtime, reverse=True)
-    r1tt, r2tt = r1stats.total_tt, r2stats.total_tt
-    r1avg, r2avg = r1tt/run1[1], r2tt/run2[1]
-    r1lgst, r1lgsttime = r1_functions_sorted[0][0], r1_functions_sorted[0][1].cumtime
-    r2lgst, r2lgsttime = r2_functions_sorted[0][0], r2_functions_sorted[0][1].cumtime
-    r1lgst, r1lgsttime = r1_functions_sorted[0][0], r1_functions_sorted[0][1].cumtime
-    r2lgst, r2lgsttime = r2_functions_sorted[0][0], r2_functions_sorted[0][1].cumtime
-    
-    storage.write(template.format(r1name=r1type,
-                                  r2name=r2type,
-                                  r1iter=run1[1],
-                                  r2iter=run2[1],
-                                  r1time=r1tt,
-                                  r2time=r2tt,
-                                  r1avg=r1avg,
-                                  r2avg=r2avg,
-                                  r1lgst=r1lgst,
-                                  r2lgst=r2lgst,
-                                  r1lgsttime=r1lgsttime,
-                                  r2lgsttime=r2lgsttime,
-                                  ))
+    # Initialize reused values
+    logger = logging.getLogger(__name__)
+    stream = io.StringIO()
+    results = []
+    col_width = 60
 
+    iterations = config.loaddatautil.iterations
 
+    # For each tuple in *profiles argument
+    for group in profiles:
+        # Break apart tuple data
+        dataset_type = group[0].dataset_type if hasattr(group[0], "dataset_type") else "N/A"
+        dataset_class = str(type(group[0]))
+        dataset_size = len(group[0])
+        dataset_dtype = group[0].data.dtype if hasattr(group[0].data, "dtype") else "N/A"
+        profile = group[1]
 
-    logging.getLogger(__name__).info(storage.getvalue())
-    
+        # Create pstats objects and print stats to io stream
+        stats = pstats.Stats(profile, stream=stream)
+        stream.write(dataset_type + "\n")
+        stats.sort_stats("cumulative").print_stats(20)
+        stats_profile = stats.get_stats_profile()
+
+        # Find total time and average time per complete iteration
+        total_time = stats_profile.total_tt
+        time_per_iter = total_time/iterations
+
+        # Sort function profiles from pstats StatsProfile by cumulative time, get first 5
+        top_five_funcs = sorted(stats_profile.func_profiles.items(), key=lambda x: x[1].cumtime, reverse=True)[:7]
+
+        # Create string presentation of each function; lists function name, file, line, and cumulative time
+        top_funcs_info = [f"{fp[0][:18]+"..." if len(fp[0]) > 21 else fp[0]}".ljust(22) + f"{"..."+fp[1].file_name[-(24-len(str(fp[1].line_number))):] if len(fp[1].file_name+":"+str(fp[1].line_number)) > 25 else fp[1].file_name}:{fp[1].line_number} - {fp[1].cumtime}s".rjust(38) for fp in top_five_funcs]
+
+        results.append((dataset_class, dataset_type, dataset_size, dataset_dtype, total_time, time_per_iter, top_funcs_info))
+
+    # Separator string between rows
+    separator = " | ".join(["-" * col_width] * len(results))
+
+    # Write header
+    headers = [f"Profile {i+1}" for i in range(len(results))]
+    stream.write(" | ".join(h.center(col_width) for h in headers) + "\n")
+    stream.write(separator + "\n")
+
+    # Config data
+    num_workers = [f"num_workers:" + f"{config.num_workers}".rjust(col_width-12) for x in range(len(results))]
+    stream.write(" | ".join(num_workers) + "\n")
+
+    batch_size = [f"batch_size:" + f"{config.training.batch_size}".rjust(col_width-11) for x in range(len(results))]
+    stream.write(" | ".join(batch_size) + "\n")
+
+    augmentations = [f"augmentations:" + f"{config.augmentations.name}".rjust(col_width-14) for x in range(len(results))]
+    stream.write(" | ".join(augmentations) + "\n")
+    stream.write(separator + "\n")
+
+    # Dataset class, type, datatype, size
+    classes = ["Class:" + f"{"..."+result[0][-40:] if len(result[0]) > 43 else result[0]}".rjust(col_width-6) for result in results]
+    stream.write(" | ".join(classes) + "\n")
+
+    types = ["Type:" + f"{result[1][-40:] if len(result[1]) > 40 else result[1]}".rjust(col_width-5) for result in results]
+    stream.write(" | ".join(types) + "\n")
+
+    datatypes = [f"dtype:" + f"{result[3]}".rjust(col_width-6) for result in results]
+    stream.write(" | ".join(datatypes) + "\n")
+
+    sizes = ["Size:" + f"{result[2]:,}".rjust(col_width-5) for result in results]
+    stream.write(" | ".join(sizes) + "\n")
+    stream.write(separator + "\n")
+
+    # Iterations, runtimes, times per iteration
+    iterations = ["Iterations:" + f"{iterations}".rjust(col_width-11) for x in range(len(results))]
+    stream.write(" | ".join(iterations) + "\n")
+
+    runtimes = ["Total time:" + f"{result[4]:.3f}s".rjust(col_width-11) for result in results]
+    stream.write(" | ".join(runtimes) + "\n")
+
+    times_per_iter = ["Time/iteration:" + f"{result[5]:.3f}s".rjust(col_width-15) for result in results]
+    stream.write(" | ".join(times_per_iter) + "\n")
+    stream.write(separator + "\n")
+
+    # Writes top 5 longest running functions
+    for i in range(7):
+        functions = " | ".join(result[6][i].ljust(col_width) for result in results)
+        stream.write(functions + "\n")
+
+    # Log to logger
+    logger.info(f"\n{stream.getvalue()}")
+
+    return
 
 
 if __name__ == "__main__":
