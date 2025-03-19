@@ -16,7 +16,8 @@ from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 def main(config):
     logger = logging.getLogger(__name__)
 
-    run_arrow_mmap(config, logger)
+    #run_arrow_mmap(config, logger)
+    run_augmentations(config, logger)
 
     logger.info(f"Log file may be found at {config.output_dir}")
 
@@ -65,25 +66,43 @@ def run_arrow_mmap(config, logger = None):
 
 
 def run_augmentations(config, logger = None):
+    if not logger:
+        logger = logging.getLogger(__name__)
+    
+    if not len(config.loaddatautil.augmentations):
+        raise ValueError("config.loaddatautil.augmentations cannot be empty")
+
+    augmentation_map = {
+        "combination":config.loaddatautil.combination,
+        "jittering":config.loaddatautil.jittering,
+        "masking":config.loaddatautil.masking,
+        "resampling":config.loaddatautil.resampling,
+        "resizing":config.loaddatautil.resizing,
+        }
 
     mmap_cfg = config.loaddatautil.mmap
 
-    dataset_combination = SSLGroupedTimeSeriesDataset(
-        data=mmap_cfg.ssl_data,
-        n_samples_per_group=config.training.n_samples_per_group,
-        percentiles=mmap_cfg.percentiles,
-        config=config.augmentations,
-        normalize_data=mmap_cfg.normalize,
-        dataset_type=mmap_cfg.dataset_type,
-        )
+    data = []
+    for augmentation in config.loaddatautil.augmentations:
+        if augmentation not in augmentation_map.keys():
+            raise ValueError(f"Augmentation \"{augmentation}\" not valid; valid: resizing|resampling|combination|jittering|masking")
+        
+        augmentation = augmentation_map[augmentation]
 
-    dataset_jittering = None
-
-    dataset_masking = None
-
-    dataset_resampling = None
-
-    dataset_resizing = None
+        logger.info(f"Loading dataset with augmentation \"{augmentation.name}\"")
+        dataset = SSLGroupedTimeSeriesDataset(
+            data=mmap_cfg.ssl_data,
+            n_samples_per_group=config.training.n_samples_per_group,
+            percentiles=mmap_cfg.percentiles,
+            config=augmentation,
+            normalize_data=mmap_cfg.normalize,
+            dataset_type=mmap_cfg.dataset_type,
+            )
+        dataloader = DataLoader(dataset=dataset, batch_size=config.training.batch_size, num_workers=config.num_workers)
+        profile_data = time_runs(loader=dataloader, num_times=config.loaddatautil.iterations)
+        data.append(profile_data)
+    
+    compare(config, data)
 
     return
 
@@ -133,6 +152,9 @@ def compare(config, *profiles: tuple[Dataset, Profile]):
     Returns:
         None: Prints data to log
     '''
+    if len(profiles) == 1 and isinstance(profiles[0], list):
+        profiles = profiles[0]
+
     if len(profiles) > 3:
         raise ValueError("More than three profiles not supported")
 
@@ -145,17 +167,18 @@ def compare(config, *profiles: tuple[Dataset, Profile]):
     iterations = config.loaddatautil.iterations
 
     # For each tuple in *profiles argument
-    for group in profiles:
+    for idx, group in enumerate(profiles):
         # Break apart tuple data
         dataset_type = group[0].dataset_type if hasattr(group[0], "dataset_type") else "N/A"
         dataset_class = str(type(group[0]))
         dataset_size = len(group[0])
-        dataset_dtype = group[0].data.dtype if hasattr(group[0].data, "dtype") else "N/A"
+        dataset_dtype = group[0].get_dtype()
+        dataset_augmentations = group[0].get_augmentations()
         profile = group[1]
 
         # Create pstats objects and print stats to io stream
         stats = pstats.Stats(profile, stream=stream)
-        stream.write(dataset_type + "\n")
+        stream.write(F"Profile {idx+1}: {dataset_type}, {dataset_class}, {dataset_augmentations}\n")
         stats.sort_stats("cumulative").print_stats(20)
         stats_profile = stats.get_stats_profile()
 
@@ -169,28 +192,31 @@ def compare(config, *profiles: tuple[Dataset, Profile]):
         # Create string presentation of each function; lists function name, file, line, and cumulative time
         top_funcs_info = [f"{fp[0][:18]+"..." if len(fp[0]) > 21 else fp[0]}".ljust(22) + f"{"..."+fp[1].file_name[-(24-len(str(fp[1].line_number))):] if len(fp[1].file_name+":"+str(fp[1].line_number)) > 25 else fp[1].file_name}:{fp[1].line_number} - {fp[1].cumtime}s".rjust(38) for fp in top_five_funcs]
 
-        results.append((dataset_class, dataset_type, dataset_size, dataset_dtype, total_time, time_per_iter, top_funcs_info))
+        results.append((dataset_class, dataset_type, dataset_size, dataset_dtype, 
+                        dataset_augmentations, total_time, time_per_iter, top_funcs_info))
 
     # Separator string between rows
-    separator = " | ".join(["-" * col_width] * len(results))
+    # separator = " | ".join(["-" * col_width] * len(results))
 
     # Write header
     headers = [f"Profile {i+1}" for i in range(len(results))]
     stream.write(" | ".join(h.center(col_width) for h in headers) + "\n")
-    stream.write(separator + "\n")
 
     # Config data
+    stream.write(" | ".join([" Config ".center(col_width, "-")] * len(results)) + "\n")
+    
     num_workers = [f"num_workers:" + f"{config.num_workers}".rjust(col_width-12) for x in range(len(results))]
     stream.write(" | ".join(num_workers) + "\n")
 
     batch_size = [f"batch_size:" + f"{config.training.batch_size}".rjust(col_width-11) for x in range(len(results))]
     stream.write(" | ".join(batch_size) + "\n")
 
-    augmentations = [f"augmentations:" + f"{config.augmentations.name}".rjust(col_width-14) for x in range(len(results))]
+    augmentations = [f"augmentations:" + f"{result[4]}".rjust(col_width-14) for result in results]
     stream.write(" | ".join(augmentations) + "\n")
-    stream.write(separator + "\n")
 
     # Dataset class, type, datatype, size
+    stream.write(" | ".join([" Dataset ".center(col_width, "-")] * len(results)) + "\n")
+
     classes = ["Class:" + f"{"..."+result[0][-40:] if len(result[0]) > 43 else result[0]}".rjust(col_width-6) for result in results]
     stream.write(" | ".join(classes) + "\n")
 
@@ -202,22 +228,26 @@ def compare(config, *profiles: tuple[Dataset, Profile]):
 
     sizes = ["Size:" + f"{result[2]:,}".rjust(col_width-5) for result in results]
     stream.write(" | ".join(sizes) + "\n")
-    stream.write(separator + "\n")
 
     # Iterations, runtimes, times per iteration
+    stream.write(" | ".join([" Time ".center(col_width, "-")] * len(results)) + "\n")
+
     iterations = ["Iterations:" + f"{iterations}".rjust(col_width-11) for x in range(len(results))]
     stream.write(" | ".join(iterations) + "\n")
 
-    runtimes = ["Total time:" + f"{result[4]:.3f}s".rjust(col_width-11) for result in results]
+    runtimes = ["Total time:" + f"{result[5]:.3f}s".rjust(col_width-11) for result in results]
     stream.write(" | ".join(runtimes) + "\n")
 
-    times_per_iter = ["Time/iteration:" + f"{result[5]:.3f}s".rjust(col_width-15) for result in results]
+    times_per_iter = ["Time/iteration:" + f"{result[6]:.3f}s".rjust(col_width-15) for result in results]
     stream.write(" | ".join(times_per_iter) + "\n")
-    stream.write(separator + "\n")
 
     # Writes top 5 longest running functions
+    stream.write(" | ".join([" Functions ".center(col_width, "-")] * len(results)) + "\n")
+
+    func_header = [f"FUNCTION NAME" + f"FILE:LINE - CUMTIME".rjust(col_width-13) for x in range(len(results))]
+    stream.write(" | ".join(func_header) + "\n")
     for i in range(7):
-        functions = " | ".join(result[6][i].ljust(col_width) for result in results)
+        functions = " | ".join(result[7][i].ljust(col_width) for result in results)
         stream.write(functions + "\n")
 
     # Log to logger

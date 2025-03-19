@@ -171,6 +171,7 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
             self._length = len(self.data)
 
         self.dataset_type = dataset_type
+        self.augmentations = config.name if hasattr(config, 'name') else 'None'
         self.logger.info(
             f"Loaded {len(self.data)} parcels with shape {self.data.shape if hasattr(self.data, 'shape') else 'N/A'}"
         )
@@ -270,3 +271,9 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
                 view2 = self.view2_transform(view2)
 
         return [view1, view2]
+
+    def get_dtype(self):
+        return self.data.dtype if self.dataset_type == "mmap_ninja" else self.data[0]["x"].dtype
+    
+    def get_augmentations(self):
+        return self.augmentations
