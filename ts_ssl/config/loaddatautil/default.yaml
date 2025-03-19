@@ -1,4 +1,6 @@
+function: runarrowmmap #runarrowmmap; runaugmentations; runarrowssl
 iterations: 10
+
 
 mmap:
   name: francecrops_20k_mmap

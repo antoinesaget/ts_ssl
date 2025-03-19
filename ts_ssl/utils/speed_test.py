@@ -64,7 +64,31 @@ def run_arrow_mmap(config, logger = None):
     return
 
 
-def time_runs(loader: DataLoader, num_times: int):
+def run_augmentations(config, logger = None):
+
+    mmap_cfg = config.loaddatautil.mmap
+
+    dataset_combination = SSLGroupedTimeSeriesDataset(
+        data=mmap_cfg.ssl_data,
+        n_samples_per_group=config.training.n_samples_per_group,
+        percentiles=mmap_cfg.percentiles,
+        config=config.augmentations,
+        normalize_data=mmap_cfg.normalize,
+        dataset_type=mmap_cfg.dataset_type,
+        )
+
+    dataset_jittering = None
+
+    dataset_masking = None
+
+    dataset_resampling = None
+
+    dataset_resizing = None
+
+    return
+
+
+def time_runs(loader: DataLoader, num_times: int, print: bool = False, logger = None):
     '''
     Iterates through an entire dataset using DataLoader <num_times> number of times. Timed using cProfile; returns pstats data from cProfile
 
@@ -76,7 +100,8 @@ def time_runs(loader: DataLoader, num_times: int):
         Tuple = (dataset type, num_times, StatsProfile of run)
     '''
     # Get logger and IO to store profile stats
-    log = logging.getLogger(__name__)
+    if not logger:
+        logger = logging.getLogger(__name__)
     stats_stream = io.StringIO()
 
     # Using a profiler, iterate through the dataset <num_times> times
@@ -92,19 +117,10 @@ def time_runs(loader: DataLoader, num_times: int):
     profile_stats.print_stats(15)
 
     # Use IO to print stats to logger
-    #log.info(f"Iterated {num_times} time(s) through dataset of size {len(loader.dataset)} with a batch size of {loader.batch_size} and {loader.num_workers} worker(s): \n\n{stats_stream.getvalue()}")
+    if print:
+        logger.info(f"Iterated {num_times} time(s) through dataset of size {len(loader.dataset)} with a batch size of {loader.batch_size} and {loader.num_workers} worker(s): \n\n{stats_stream.getvalue()}")
     
     return loader.dataset, pr
-
-
-def present_stats(stats: StatsProfile):
-    log = logging.getLogger(__name__)
-    log.info(f"{stats.total_tt}")
-    log.info(list(stats.func_profiles.values())[0])
-    sorted_list = sorted(stats.func_profiles.items(), key=lambda x: x[1].cumtime, reverse=True)
-    for key, val in sorted_list[:10]:
-        log.info(f"{key[:10] + "..." if len(key) > 10 else key + " " * (13-len(key))}: {val.cumtime}")
-    return
 
 
 def compare(config, *profiles: tuple[Dataset, Profile]):
