@@ -5,7 +5,7 @@ defaults:
   - dataset: francecrops_mini
   - optimizer: base
   - visualizer: default
-  - loaddatautil: default
+  - dataloaderutil: default
   - _self_
 
 hydra:

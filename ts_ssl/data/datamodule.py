@@ -171,7 +171,7 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
             self._length = len(self.data)
 
         self.dataset_type = dataset_type
-        self.augmentations = config.name if hasattr(config, 'name') else 'None'
+        self.augmentations = config.name if hasattr(config, 'name') else None
         self.logger.info(
             f"Loaded {len(self.data)} parcels with shape {self.data.shape if hasattr(self.data, 'shape') else 'N/A'}"
         )

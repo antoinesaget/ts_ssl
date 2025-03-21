@@ -1,15 +1,20 @@
-function: runarrowmmap #runarrowmmap; runaugmentations; runarrowssl
-iterations: 10
-augmentations: [resizing, combination, jittering] # 3 max; resizing|resampling|combination|jittering|masking
+function: runarrowmmap # functions to be ran: runarrowmmap|runaugmentations|runnumworkers|runbatchsize
+
+iterations: 10 # Default number of times a dataset is iterated through each run
+dataset_type: mmap # Default dataset type to be used when not testing different dataset types; mmap|happyface
+
+augmentations: [resizing, combination, resampling] # Augmentations to be compared; 3 max; resizing|resampling|combination|jittering|masking
+num_workers: [4, 8, 16] # Number of workers to be compared in run_num_workers; be aware of computer's map number of workers
+batch_sizes: [512, 1024, 2048] # Batch_sizes to be compared in run_batch_size
 
 mmap:
   name: francecrops_20k_mmap
   dataset_type: mmap_ninja
 
-  ssl_data: ${location.base_path}/${loaddatautil.mmap.name}/contrast
-  validation_data: ${location.base_path}/${loaddatautil.mmap.name}/validation
-  train_data: ${location.base_path}/${loaddatautil.mmap.name}/train
-  test_data: ${location.base_path}/${loaddatautil.mmap.name}/test
+  ssl_data: ${location.base_path}/${dataloaderutil.mmap.name}/contrast
+  validation_data: ${location.base_path}/${dataloaderutil.mmap.name}/validation
+  train_data: ${location.base_path}/${dataloaderutil.mmap.name}/train
+  test_data: ${location.base_path}/${dataloaderutil.mmap.name}/test
 
   percentiles: [
     [105.0, 192.0, 388.0, 240.0, 664.0, 1257.0, 1393.0, 1438.0, 1524.0, 1638.0, 1183.0, 569.0],
@@ -27,19 +32,19 @@ arrow:
 
   ssl_data:
     path: saget-antoine/francecrops
-    cache_dir: ${location.base_path}/${loaddatautil.arrow.name}
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
     split: train
   validation_data:
     path: saget-antoine/francecrops
-    cache_dir: ${location.base_path}/${loaddatautil.arrow.name}
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
     split: train
   test_data:
     path: saget-antoine/francecrops
-    cache_dir: ${location.base_path}/${loaddatautil.arrow.name}
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
     split: train
   train_data:
     path: saget-antoine/francecrops
-    cache_dir: ${location.base_path}/${loaddatautil.arrow.name}
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
     split: train
 
 
