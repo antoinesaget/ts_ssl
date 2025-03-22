@@ -1,15 +1,16 @@
-import logging
+import random
+from pathlib import Path
 
 import hydra
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import torch
 from torch.utils.data import DataLoader, Dataset
 
 from ts_ssl.data.datamodule import (
     SSLGroupedTimeSeriesDataset,
     SupervisedGroupedTimeSeriesDataset,
 )
+from ts_ssl.utils.logger_manager import LoggerManager
 
 # To use, run "python visualizer.py"
 # Config defaults in ts_ssl/config/visualizer.yaml
@@ -17,14 +18,27 @@ from ts_ssl.data.datamodule import (
 #       - "plotbeforeandafter": plots one sample specified by config.visualizer.sample, before and after data augmentations are applied
 #       - "plotsingleclass": plots one random sample of class specified by config.visualizer.classid (0-19)
 #       - "plotmulticlass": plots one random sample per class in dataset (20 total)
+#
+# Plot display/saving options:
+#       - config.visualizer.save_plot: when true, plots are saved to the output directory instead of displaying
+#                                      when false (default), plots are displayed in interactive windows
 
 
 @hydra.main(config_path="../config", config_name="config", version_base="1.3")
 def visualize(config):
-    logger = logging.getLogger(__name__)
+    logger = LoggerManager(
+        output_dir=Path(config.output_dir),
+        loggers=config.logging.enabled_loggers,
+        log_file=Path(config.output_dir) / "visualize.log",
+    )
 
     func = config.visualizer.function
-    seed = config.visualizer.seed if config.visualizer.seed != "None" else None
+    save_plot = (
+        config.visualizer.save_plot
+        if hasattr(config.visualizer, "save_plot")
+        else False
+    )
+
     # Determine function to use; initialize dataset appropriately (SSL for beforeandafter, Supervised otherwise)
     if func == "plotbeforeandafter":
         logger.info("Loading dataset")
@@ -43,6 +57,9 @@ def visualize(config):
             overlay=config.visualizer.overlay,
             augmentation=config.augmentations.name,
             bands=config.visualizer.bands,
+            save_plot=save_plot,
+            output_dir=Path(config.output_dir),
+            logger=logger,
         )
     elif func == "plotsingleclass":
         logger.info("Loading dataset")
@@ -54,7 +71,11 @@ def visualize(config):
             dataset_type=config.dataset.dataset_type,
         )
         plotsingleclassexamples(
-            dataset=dataset, classid=config.visualizer.classid, shuffle_seed=seed
+            dataset=dataset,
+            classid=config.visualizer.classid,
+            save_plot=save_plot,
+            output_dir=Path(config.output_dir),
+            logger=logger,
         )
     elif func == "plotmulticlass":
         logger.info("Loading dataset")
@@ -65,83 +86,31 @@ def visualize(config):
             normalize_data=config.dataset.normalize,
             dataset_type=config.dataset.dataset_type,
         )
-        plotmulticlassexamples(dataset=dataset, shuffle_seed=seed)
+        plotmulticlassexamples(
+            dataset=dataset,
+            save_plot=save_plot,
+            output_dir=Path(config.output_dir),
+            logger=logger,
+        )
 
 
-def plotdata(dataset: Dataset) -> None:
-    """
-    Displays a plot representation of a pytorch Dataset
-
-    Parameters:
-        dataset: pytorch Dataset with feature shape (100, 60, 12)
-
-    Returns:
-        None
-    """
-    # sample of one time series (len=60)
-    sample = dataset[0][0][0].tolist()
-
-    # List [0,..., 59], time points
-    temporal_dim = list(range(len(sample)))
-
-    # Sort values of same spectral bands into 2d list shape (12, 60); Method found on GeeksforGeeks "Group Elements at Same Indices in a Multi-List"
-    spectral_bands = [list(indices) for indices in zip(*sample)]
-
-    # Add each band to the plot
-    for idx in range(12):
-        plt.plot(temporal_dim, spectral_bands[idx], label=f"Band {idx}")
-    plt.legend()
-    plt.show()
-    return
-
-
-def plotdata(datasets: list[Dataset]) -> None:
-    """
-    Displays a multi-plot representation of a pytorch Dataset
-
-    Parameters:
-        dataset: pytorch Dataset with feature shape (100, 60, 12)
-
-    Returns:
-        None
-    """
-    figs, axes = plt.subplots(len(datasets))
-    for dataset_idx in range(len(datasets)):
-        # Get individual dataset from list argument
-        dataset = datasets[dataset_idx]
-
-        # Sample of one time series (len=60)
-        sample = dataset[0]["x"][0].tolist()  # HuggingFace dataset
-
-        # List [0,..., 59], time points
-        temporal_dim = list(range(len(sample)))
-
-        # Sort values of same spectral bands into 2d list shape (12, 60); Method found on GeeksforGeeks "Group Elements at Same Indices in a Multi-List"
-        spectral_bands = [list(indices) for indices in zip(*sample)]
-
-        # Add each band to the plot
-        for idx in range(12):
-            axes[dataset_idx].plot(
-                temporal_dim, spectral_bands[idx], label=f"Band {idx}"
-            )
-    plt.legend()
-    plt.show()
-    return
-
-
-def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
+def plotmulticlassexamples(
+    dataset: Dataset, save_plot=False, output_dir=None, logger=None
+) -> None:
     """
     Plots example from each class of a dataset.
 
     Parameters:
         dataset: dataset to select data from with feature shape (100, 60, 12)
-        shuffle_seed: integer seed to shuffle set for selection
+        save_plot: if True, save plot to file instead of displaying
+        output_dir: directory to save plot (only used if save_plot is True)
+        logger: LoggerManager instance for logging
 
     Returns:
         None
     """
     # Get list of sample from each class, create list [0...59] for plotting
-    samples = _getmulticlassexamples(dataset, shuffle_seed=shuffle_seed)
+    samples = _getmulticlassexamples(dataset, logger=logger)
     temporal_dim = list(range(60))
 
     # Create 5x4 subplot figure and init row and col indexes
@@ -175,34 +144,40 @@ def plotmulticlassexamples(dataset: Dataset, shuffle_seed=None) -> None:
         else:
             raise IndexError("Row/column index out of range")
 
-    plt.show()
+    if save_plot and output_dir:
+        plot_path = output_dir / "multiclass_examples.png"
+        plt.savefig(plot_path)
+        if logger:
+            logger.info(f"Plot saved to {plot_path}")
+    else:
+        plt.show()
     return
 
 
-def _getmulticlassexamples(dataset: Dataset, shuffle_seed=None):
+def _getmulticlassexamples(dataset: Dataset, n_classes: int = 20, logger=None):
     """Helper function to obtain a sample from each class of a dataset. Returns list of same length as number of classes in the dataset"""
-    logging.getLogger(__name__).info("Selecting example from each class")
-    # Init list of len = 20 with None values
-    samples = [None] * 20
+    if logger:
+        logger.info("Selecting example from each class")
+    samples = {}
 
-    # Create sampler to shuffle data
-    sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
+    sampler = DataLoader(dataset=dataset, shuffle=True)
 
-    # Iterate until 10 samples of same class are found
-    while samples.count(None) != 0:
-        # Access next sample
-        sample = next(sampler)
+    for sample in sampler:
+        _, y = sample
+        classid = int(y)
+        if classid not in samples.keys():
+            samples[classid] = sample
+        if len(samples) == n_classes:
+            break
 
-        # Get samples class id
-        classid = int(sample[1][1])
-        if samples[classid] == None:
-            samples[classid] = sample[1]
+    # Sort samples by class id
+    sorted_samples = sorted(samples.items())
 
-    return samples
+    return [sample for _, sample in sorted_samples]
 
 
 def plotsingleclassexamples(
-    dataset: Dataset, classid: int, shuffle_seed: int = None
+    dataset: Dataset, classid: int, save_plot=False, output_dir=None, logger=None
 ) -> None:
     """
     Plots 10 examples from one specified class of a dataset.
@@ -210,7 +185,9 @@ def plotsingleclassexamples(
     Parameters:
         dataset: dataset to select data from with feature shape (100, 60, 12)
         classid: integer of targeted class
-        shuffle_seed: integer seed to shuffle set for selection
+        save_plot: if True, save plot to file instead of displaying
+        output_dir: directory to save plot (only used if save_plot is True)
+        logger: LoggerManager instance for logging
 
     Returns:
         None
@@ -218,7 +195,7 @@ def plotsingleclassexamples(
     # Get samples of specified class, get the timeseries data from each
     samples = [
         sample[0][0][0]
-        for sample in _getsingleclassexamples(dataset, classid, shuffle_seed)
+        for sample in _getsingleclassexamples(dataset, classid, logger=logger)
     ]
     temporal_dim = list(range(60))
 
@@ -251,36 +228,47 @@ def plotsingleclassexamples(
         else:
             raise IndexError("Row/column index out of range")
 
-    plt.show()
+    if save_plot and output_dir:
+        plot_path = output_dir / f"class_{classid}_examples.png"
+        plt.savefig(plot_path)
+        if logger:
+            logger.info(f"Plot saved to {plot_path}")
+    else:
+        plt.show()
     return
 
 
-def _getsingleclassexamples(dataset: Dataset, classid: int, shuffle_seed: int = None):
+def _getsingleclassexamples(dataset: Dataset, classid: int, logger=None):
     """Helper function to return ten samples of specified class, each with feature shape dependant on dataset type."""
-    logging.getLogger(__name__).info("Selecting examples from specified class")
+    if logger:
+        logger.info("Selecting examples from specified class")
     # Init list to be returned
     samples = []
 
     # Create sampler to shuffle mmap data
-    sampler = enumerate(DataLoader(dataset=dataset, shuffle=True))
+    sampler = DataLoader(dataset=dataset, shuffle=True)
 
     # Iterate until 10 samples of same class are found
-    while len(samples) < 10:
-        sample = next(sampler)
-        sampleclassid = int(sample[1][1])
-        if sampleclassid == classid:
-            samples.append(sample[1])
+    for sample in sampler:
+        _, y = sample
+        if y == classid:
+            samples.append(sample)
+        if len(samples) == 10:
+            break
 
     return samples
 
 
 # masking, resampling, resizing, combination, jittering
 def plotbeforeandafter(
-    dataset: Dataset,
-    sample: int = 0,
+    dataset: SSLGroupedTimeSeriesDataset,
+    sample: int = -1,
     augmentation: str = "augmentation",
     overlay: bool = True,
-    bands: list[int] = None,
+    bands: list[int] | None = None,
+    save_plot=False,
+    output_dir=None,
+    logger=None,
 ) -> None:
     """
     Displays a two plot visualization of a sample from an SSLGroupedTimeSeriesDataset, one before augmentations are applied, the other after.
@@ -293,6 +281,9 @@ def plotbeforeandafter(
         augmentation: name of applied augmentation
         overlay: if true, before/after data displayed on same graph; if false, before/after data displayed on separate graphs
         bands: list of spectral bands to be displayed; defaults to all bands
+        save_plot: if True, save plot to file instead of displaying
+        output_dir: directory to save plot (only used if save_plot is True)
+        logger: LoggerManager instance for logging
 
     Returns:
         None
@@ -300,8 +291,8 @@ def plotbeforeandafter(
     # Initialize bands to be displayed
     if not bands:
         bands = [x for x in list(range(12))]
-    if not sample:
-        sample = int(torch.randint(high=len(dataset), size=(1,)))
+    if sample == -1:
+        sample = random.randint(0, len(dataset))
 
     # Sample of one time series (len=60)
     sample_before = dataset.get_raw_item(sample)[0][0].tolist()
@@ -334,7 +325,10 @@ def plotbeforeandafter(
     # Overlayed plots
     else:
         if dataset.normalize_data:
-            raise ValueError("Overlay and dataset normalization are mutually exclusive")
+            error_msg = "Overlay and dataset normalization are mutually exclusive"
+            if logger:
+                logger.error(error_msg)
+            raise ValueError(error_msg)
 
         # Define matplotlib plot
         fig, axe = plt.subplots(layout="constrained")
@@ -366,7 +360,14 @@ def plotbeforeandafter(
             loc="outside left lower",
         )
 
-    plt.show()
+    if save_plot and output_dir:
+        sample_str = f"sample_{sample}"
+        plot_path = output_dir / f"beforeafter_{augmentation}_{sample_str}.png"
+        plt.savefig(plot_path)
+        if logger:
+            logger.info(f"Plot saved to {plot_path}")
+    else:
+        plt.show()
     return
 
 
