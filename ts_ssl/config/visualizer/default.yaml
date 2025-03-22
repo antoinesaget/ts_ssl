@@ -1,0 +1,7 @@
+# Visualizer configuration
+sample: -1
+overlay: false
+classid: 0
+bands: []
+function: "plotbeforeandafter" 
+save_plot: false  # If true, save plot to file instead of displaying

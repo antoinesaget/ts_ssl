@@ -4,6 +4,7 @@ defaults:
   - augmentations: resampling
   - dataset: francecrops_mini
   - optimizer: base
+  - visualizer: default
   - _self_
 
 hydra:
