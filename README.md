@@ -14,6 +14,7 @@ RS-TS-SSL is a PyTorch-based framework designed for self-supervised learning on 
 - Various time series augmentation techniques (Jitter, Masking, Cropping, Resampling)
 - Flexible encoder architectures
 - Comprehensive evaluation and fine-tuning capabilities
+- Data visualization tools for time series inspection
 
 ## Project Structure
 
@@ -186,6 +187,7 @@ The project uses Hydra for configuration management. Key configuration areas:
 - **Dataset**: Configure dataset parameters in `config/dataset/`
 - **Augmentations**: Modify augmentation strategies in `config/augmentations/`
 - **Training**: Adjust training parameters in `config/config.yaml`
+- **Visualization**: Configure plot settings in `config/visualizer/`
 
 For a complete list of configuration options, run:
 ```bash

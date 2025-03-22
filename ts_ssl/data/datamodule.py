@@ -41,7 +41,7 @@ class GroupedTimeSeriesDataset(Dataset):
 
         self.data_dir = Path(data) if isinstance(data, str) else Path(data["cache_dir"])
         self.transform = transform
-        self._length = None
+        self._length = -1
         self.logger = logger if logger is not None else logging.getLogger(__name__)
         self.normalize_data = normalize_data
 
@@ -123,7 +123,8 @@ class SupervisedGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
             y = torch.tensor(self.labels[idx])
 
         # Normalize the data
-        x = self.normalize(x)
+        if self.normalize_data:
+            x = self.normalize(x)
 
         # Apply additional transforms if specified
         if self.transform is not None:
@@ -277,3 +278,56 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
     
     def get_augmentations(self):
         return self.augmentations
+    def get_raw_item(self, idx):
+        # Handle different types of indices
+        if isinstance(idx, (list, tuple, range)):
+            indices = idx
+            is_batch = True
+        elif isinstance(idx, slice):
+            # Convert slice to list of indices
+            start = idx.start if idx.start is not None else 0
+            stop = idx.stop if idx.stop is not None else len(self)
+            step = idx.step if idx.step is not None else 1
+            indices = range(start, stop, step)
+            is_batch = True
+        elif isinstance(idx, int):
+            indices = [idx]
+            is_batch = False
+        else:
+            raise TypeError(f"Invalid index type: {type(idx)}")
+
+        # Break down data loading steps
+        if self.dataset_type == "huggingface":
+            x = self.data[indices]["x"] if is_batch else self.data[idx]["x"]
+        else:
+            x = self.data[indices] if is_batch else self.data[idx]
+            x = x.copy()
+            x = torch.from_numpy(x)
+            x = x.float()
+
+        # Sample groups using specified strategy
+        if is_batch:
+            # For batches, we need to handle each sample
+            B = len(indices)  # Batch size
+            view1_list = []
+            view2_list = []
+            for i in range(B):
+                v1, v2 = sample_groups(
+                    x[i], self.n_samples_per_group, self.sampling_strategy
+                )
+                view1_list.append(v1)
+                view2_list.append(v2)
+            view1 = torch.stack(view1_list)
+            view2 = torch.stack(view2_list)
+        else:
+            view1, view2 = sample_groups(
+                x, self.n_samples_per_group, self.sampling_strategy
+            )
+
+        if self.normalize_data:
+            view1 = self.normalize(view1)
+            view2 = self.normalize(view2)
+
+        # Skip transformations
+
+        return [view1, view2]
