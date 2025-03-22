@@ -41,7 +41,7 @@ class GroupedTimeSeriesDataset(Dataset):
 
         self.data_dir = Path(data) if isinstance(data, str) else Path(data["cache_dir"])
         self.transform = transform
-        self._length = None
+        self._length = -1
         self.logger = logger if logger is not None else logging.getLogger(__name__)
         self.normalize_data = normalize_data
 
