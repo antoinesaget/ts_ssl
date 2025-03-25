@@ -23,6 +23,7 @@ The visualizer configuration is stored in a dedicated file `ts_ssl/config/visual
 The visualizer supports three main functions, controlled by the `visualizer.function` parameter:
 
 #### 1. Plot Before and After Augmentation (`plotbeforeandafter`)
+
 Plots one sample before and after data augmentations are applied.
 
 ```bash

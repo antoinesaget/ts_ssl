@@ -1,0 +1,182 @@
+function: runarrowmmap # functions to be ran: runarrowmmap|runaugmentations|runnumworkers|runbatchsize
+
+iterations: 10 # Default number of times a dataset is iterated through each run
+dataset_type: mmap # Default dataset type to be used when not testing different dataset types; mmap|happyface
+
+augmentations: [resizing, combination, resampling] # Augmentations to be compared; resizing|resampling|combination|jittering|masking; Maximum of three is recommended for easy-to-read terminal output. If more than three, viewing log file output is recommended.
+num_workers: [4, 8, 16] # Number of workers to be compared in run_num_workers; be aware of computer's map number of workers
+batch_sizes: [512, 1024, 2048] # Batch_sizes to be compared in run_batch_size
+
+mmap:
+  name: francecrops_20k_mmap
+  dataset_type: mmap_ninja
+
+  ssl_data: ${location.base_path}/${dataloaderutil.mmap.name}/contrast
+  validation_data: ${location.base_path}/${dataloaderutil.mmap.name}/validation
+  train_data: ${location.base_path}/${dataloaderutil.mmap.name}/train
+  test_data: ${location.base_path}/${dataloaderutil.mmap.name}/test
+
+  percentiles: [
+    [105.0, 192.0, 388.0, 240.0, 664.0, 1257.0, 1393.0, 1438.0, 1524.0, 1638.0, 1183.0, 569.0],
+    [1272.0, 1543.0, 2008.0, 2617.0, 3022.0, 4322.0, 5217.0, 5451.0, 5438.0, 5377.0, 4546.0, 3611.0]
+  ]
+
+  normalize: true
+  n_channels: 12
+  group_size: 100
+  n_timesteps: 60
+
+arrow:
+  name: francecrops_nano
+  dataset_type: huggingface
+
+  ssl_data:
+    path: saget-antoine/francecrops
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
+    split: train
+  validation_data:
+    path: saget-antoine/francecrops
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
+    split: train
+  test_data:
+    path: saget-antoine/francecrops
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
+    split: train
+  train_data:
+    path: saget-antoine/francecrops
+    cache_dir: ${location.base_path}/${dataloaderutil.arrow.name}
+    split: train
+
+
+  percentiles: [
+    [105.0, 192.0, 388.0, 240.0, 664.0, 1257.0, 1393.0, 1438.0, 1524.0, 1638.0, 1183.0, 569.0],
+    [1272.0, 1543.0, 2008.0, 2617.0, 3022.0, 4322.0, 5217.0, 5451.0, 5438.0, 5377.0, 4546.0, 3611.0]
+  ]
+
+  normalize: true
+  n_channels: 12
+  group_size: 100
+  n_timesteps: 60
+
+combination:
+  name: combination
+  views_sampling_strategy: "group"
+
+  multiview_transforms:
+    resampling:
+      _target_: ts_ssl.data.augmentations.ResamplingAugmentation
+      upsampling_factor: 2.0
+      subsequence_length_ratio: 0.25
+
+  view1:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.01
+      time_masking:
+        _target_: ts_ssl.data.augmentations.TimeMasking
+        num_masks: 3
+        mask_length: 0.1
+      resizing:
+        _target_: ts_ssl.data.augmentations.Resizing
+        magnitude: 0.05
+        
+  view2:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.01
+      time_masking:
+        _target_: ts_ssl.data.augmentations.TimeMasking
+        num_masks: 3
+        mask_length: 0.1 
+      resizing:
+        _target_: ts_ssl.data.augmentations.Resizing
+        magnitude: 0.05
+
+jittering:
+  name: jittering
+
+  views_sampling_strategy: "group"
+
+  view1:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.1
+        
+  view2:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.1
+
+masking:
+  name: masking
+
+  views_sampling_strategy: "group"
+
+  view1:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.03
+      time_masking:
+        _target_: ts_ssl.data.augmentations.TimeMasking
+        num_masks: 3
+        mask_length: 0.1
+        
+  view2:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.03
+      time_masking:
+        _target_: ts_ssl.data.augmentations.TimeMasking
+        num_masks: 3
+        mask_length: 0.1 
+
+resampling:
+  name: resampling
+  views_sampling_strategy: "group"
+
+  multiview_transforms:
+    resampling:
+      _target_: ts_ssl.data.augmentations.ResamplingAugmentation
+      upsampling_factor: 2.0
+      subsequence_length_ratio: 0.25
+
+  view1:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.01
+
+  view2:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.01 
+
+resizing:
+  name: resizing
+
+  views_sampling_strategy: "group"
+
+  view1:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.03
+      resizing:
+        _target_: ts_ssl.data.augmentations.Resizing
+        magnitude: 0.05
+        
+  view2:
+    transforms:
+      jittering:
+        _target_: ts_ssl.data.augmentations.Jittering
+        sigma: 0.03
+      resizing:
+        _target_: ts_ssl.data.augmentations.Resizing
+        magnitude: 0.3
