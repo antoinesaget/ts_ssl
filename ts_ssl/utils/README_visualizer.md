@@ -33,13 +33,6 @@ python visualizer.py visualizer.function=plotbeforeandafter augmentations=maskin
 # Specify a sample index
 python visualizer.py visualizer.function=plotbeforeandafter visualizer.sample=42
 
-### Additional Configuration Options
-- `visualizer.sample`: Specify which sample to visualize (default: random)
-- `visualizer.overlay`: Whether to overlay before/after plots (default: true)
-- `visualizer.bands`: List of spectral bands to display (default: all bands)
-- `visualizer.seed`: Seed for random sample selection (default: None)
-- `dataset.normalize`: Whether to normalize the data (recommended to set to false for visualization)
-
 # Display plots overlaid instead of one above the other
 python visualizer.py visualizer.function=plotbeforeandafter visualizer.overlay=true
 
@@ -64,6 +57,7 @@ python visualizer.py visualizer.function=plotmulticlass
 ```
 
 ### Global Configuration Options
+
 These options apply to all visualization functions:
 
 - `dataset.normalize`: Whether to normalize the data (default: depends on dataset; recommended to set to false for visualization)
@@ -78,6 +72,7 @@ These options apply to all visualization functions:
   ```
 
 ### Output Files
+
 When `visualizer.save_plot` is set to true, the plots will be saved with the following naming conventions:
 
 - For `plotbeforeandafter`: `beforeafter_{augmentation_name}_{sample_index}.png`
