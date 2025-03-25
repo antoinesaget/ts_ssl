@@ -353,16 +353,33 @@ def compare(
         # Create string presentation of each function; lists function name, file, line, and cumulative time
         name_max_len = (col_width * 7) // 20  # 7/20ths of width
         file_max_len = (col_width * 9) // 20  # 9/20ths of width
-        top_funcs_info = [
-            f"{fp[0][: name_max_len - 3] + '...' if len(fp[0]) > name_max_len else fp[0]}".ljust(
-                name_max_len
-            )
-            + f"{'...' + fp[1].file_name[-((file_max_len - 3) - len(str(fp[1].line_number))) :] if len(fp[1].file_name + ':' + str(fp[1].line_number)) > file_max_len else fp[1].file_name}:{fp[1].line_number} - {fp[1].cumtime}s".rjust(
-                col_width - name_max_len
-            )
-            for fp in top_five_funcs
-        ]
-        #                                                   name_max_len is the most the name column will take -^                                                      ^- fime_name length = file_max_len - 3 (for "...") - length of line_number                                         file, line, and cumtime uses the space name_max_len doesn't -^
+        top_funcs_info = []
+        for fp in top_five_funcs:
+            # Format function name with truncation if needed
+            if len(fp[0]) > name_max_len:
+                func_name = fp[0][:name_max_len-3] + "..."
+            else:
+                func_name = fp[0]
+            # name_max_len is the most the name column will take
+            func_name = func_name.ljust(name_max_len)
+            
+            # Format file name with truncation if needed
+            line_number_str = str(fp[1].line_number)
+            if len(fp[1].file_name + ":" + line_number_str) > file_max_len:
+                # fime_name length = file_max_len - 3 (for "...") - length of line_number
+                file_display_length = (file_max_len - 3) - len(line_number_str)
+                file_name = "..." + fp[1].file_name[-file_display_length:]
+            else:
+                file_name = fp[1].file_name
+                
+            # Combine file info with cumulative time
+            file_info = f"{file_name}:{line_number_str} - {fp[1].cumtime}s"
+            # file, line, and cumtime uses the space name_max_len doesn't
+            file_info = file_info.rjust(col_width - name_max_len)
+            
+            # Combine function name and file info
+            top_funcs_info.append(func_name + file_info)
+        
         results.append(
             (
                 dataset_class,
