@@ -1,12 +1,14 @@
 import hydra
-import mmap_ninja
 import torch
 import logging
+from logger_manager import LoggerManager
+from pathlib import Path
 from tqdm import tqdm
 
 import cProfile, pstats, io
 from pstats import StatsProfile
 from cProfile import Profile
+
 from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
@@ -14,7 +16,11 @@ from ts_ssl.data.datamodule import SSLGroupedTimeSeriesDataset
 
 @hydra.main(config_path="../config", config_name="config", version_base="1.3")
 def main(config):
-    logger = logging.getLogger(__name__)
+    logger = LoggerManager(
+        output_dir=Path(config.output_dir),
+        loggers=config.logging.enabled_loggers,
+        log_file=Path(config.output_dir) / "dataloading.log",
+    )
 
     function = config.dataloaderutil.function
 
@@ -27,9 +33,9 @@ def main(config):
     elif function == "runbatchsize":
         run_batch_size(config, logger)
     else:
-        ValueError("Config value dataloaderutil.function must be runarrowmmap|runaugmentations|runnumworkers")
+        ValueError("Config value dataloaderutil.function must be runarrowmmap|runaugmentations|runbatchsize|runnumworkers")
 
-    logger.info(f"Log file may be found at {config.output_dir}")
+    logger.info(f"Log file may be found at {config.output_dir}/dataloading.log")
 
 
 def run_arrow_mmap(config, logger = None) -> None:
@@ -73,7 +79,7 @@ def run_arrow_mmap(config, logger = None) -> None:
     data_mmap = time_runs(dataloader_mmap, config.dataloaderutil.iterations)
 
     # Compare data
-    compare(config, data_arrow, data_mmap)
+    compare(config, logger, data_arrow, data_mmap)
 
     return
 
@@ -82,8 +88,8 @@ def run_augmentations(config, logger = None) -> None:
     '''
     Times and compares iteration through datasets with augmentations specified in the config
     '''
-    if not (0 < len(config.dataloaderutil.augmentations) < 4):    
-        raise ValueError("Config values dataloaderutil.augmentations must have length in [1, 3]")
+    if not (0 < len(config.dataloaderutil.augmentations)):    
+        raise ValueError("Config values dataloaderutil.augmentations must have length greater than zero")
     
     if not logger:
         logger = logging.getLogger(__name__)
@@ -119,7 +125,7 @@ def run_augmentations(config, logger = None) -> None:
         profile_data = time_runs(loader=dataloader, num_times=config.dataloaderutil.iterations)
         data.append(profile_data)
     
-    compare(config, data)
+    compare(config, logger, data)
 
     return
 
@@ -154,7 +160,7 @@ def run_num_workers(config, logger = None) -> None:
         profile_data = time_runs(loader=dataloader, num_times=config.dataloaderutil.iterations)
         data.append(profile_data)
     
-    compare(config, data)
+    compare(config, logger, data)
     return
 
 
@@ -190,20 +196,21 @@ def run_batch_size(config, logger = None) -> None:
 
         data.append(profile_data)
 
-    compare(config, data)
+    compare(config, logger, data)
     return
 
 
-def time_runs(loader: DataLoader, num_times: int, print: bool = False, logger = None):
+def time_runs(loader: DataLoader, num_times: int, print: bool = False, logger = None) -> tuple[DataLoader, Profile]:
     '''
-    Iterates through an entire dataset using DataLoader <num_times> number of times. Timed using cProfile; returns pstats data from cProfile
+    Iterates through an entire dataset using DataLoader <num_times> number of times. 
+    Timed using cProfile; returns inputted DataLoader and cProfile Profile object containing run statistics
 
     Arguments:
         loader: pytorch DataLoader
         num_times: integer number of iterations
 
     Returns:
-        Tuple = (dataset type, num_times, StatsProfile of run)
+        tuple: (input DataLoader, cProfile Profile from runs)
     '''
     # Get logger and IO to store profile stats
     if not logger:
@@ -218,22 +225,23 @@ def time_runs(loader: DataLoader, num_times: int, print: bool = False, logger = 
                     len(item)
                     pbar.update(1)
 
-    # Obtain the profiler stats, format, and print to IO 
-    profile_stats = pstats.Stats(pr, stream=stats_stream).sort_stats("cumulative")
-    profile_stats.print_stats(15)
-
     # Use IO to print stats to logger
     if print:
+        # Obtain the profiler stats, format, and print to IO 
+        profile_stats = pstats.Stats(pr, stream=stats_stream).sort_stats("cumulative")
+        profile_stats.print_stats(15)
         logger.info(f"Iterated {num_times} time(s) through dataset of size {len(loader.dataset)} with a batch size of {loader.batch_size} and {loader.num_workers} worker(s): \n\n{stats_stream.getvalue()}")
     
     return loader, pr
 
 
-def compare(config, *profiles: tuple[DataLoader, Profile]):
+def compare(config, logger: LoggerManager = None, *profiles: tuple[DataLoader, Profile]):
     '''
     Compares up to three runs from time_runs(); prints information to log in readable form.
 
     Arguments:
+        config: hydra config
+        logger: LoggerManager logger; if None provided, defaults to generic python logger
         *profiles: array of tuples in format (pytorch DataLoader, cProfile Profile object)
     
     Returns:
@@ -244,11 +252,9 @@ def compare(config, *profiles: tuple[DataLoader, Profile]):
     if len(profiles) == 1 and isinstance(profiles[0], list):
         profiles = profiles[0]
 
-    if len(profiles) > 3:
-        raise ValueError("More than three profiles not supported")
-
     # Initialize reused values
-    logger = logging.getLogger(__name__)
+    if not logger:
+        logger = logging.getLogger(__name__)
     stream = io.StringIO()
     results = []
     col_width = 55
@@ -270,7 +276,7 @@ def compare(config, *profiles: tuple[DataLoader, Profile]):
 
         # Create pstats objects and print stats to io stream
         stats = pstats.Stats(profile, stream=stream)
-        stream.write(F"Profile {idx+1}: {dataset_type}, {dataset_class}, {dataset_augmentations}\n")
+        stream.write(F"Profile {idx+1}: {dataset_type}, {dataset_class}, {dataset_augmentations}, {dataloader_batch_size} batch size, {dataloader_num_workers} workers\n")
         stats.sort_stats("cumulative").print_stats(20)
         stats_profile = stats.get_stats_profile()
 
@@ -282,14 +288,13 @@ def compare(config, *profiles: tuple[DataLoader, Profile]):
         top_five_funcs = sorted(stats_profile.func_profiles.items(), key=lambda x: x[1].cumtime, reverse=True)[:7]
 
         # Create string presentation of each function; lists function name, file, line, and cumulative time
-        top_funcs_info = [f"{fp[0][:18]+"..." if len(fp[0]) > 21 else fp[0]}".ljust(22) + f"{"..."+fp[1].file_name[-(18-len(str(fp[1].line_number))):] if len(fp[1].file_name+":"+str(fp[1].line_number)) > 21 else fp[1].file_name}:{fp[1].line_number} - {fp[1].cumtime}s".rjust(33) for fp in top_five_funcs]
-
+        name_max_len = (col_width * 7) // 20 # 7/20ths of width
+        file_max_len = (col_width * 9) // 20 # 9/20ths of width
+        top_funcs_info = [f"{fp[0][:name_max_len-3]+"..." if len(fp[0]) > name_max_len else fp[0]}".ljust(name_max_len) + f"{"..."+fp[1].file_name[-((file_max_len - 3)-len(str(fp[1].line_number))):] if len(fp[1].file_name+":"+str(fp[1].line_number)) > file_max_len else fp[1].file_name}:{fp[1].line_number} - {fp[1].cumtime}s".rjust(col_width-name_max_len) for fp in top_five_funcs]
+        #                                                   name_max_len is the most the name column will take -^                                                      ^- fime_name length = file_max_len - 3 (for "...") - length of line_number                                         file, line, and cumtime uses the space name_max_len doesn't -^
         results.append((dataset_class, dataset_type, dataset_size, dataset_dtype, 
                         dataset_augmentations, dataloader_num_workers, dataloader_batch_size,
                         total_time, time_per_iter, top_funcs_info))
-
-    # Separator string between rows
-    # separator = " | ".join(["-" * col_width] * len(results))
 
     # Write header
     headers = [f"Profile {i+1}" for i in range(len(results))]
@@ -310,7 +315,8 @@ def compare(config, *profiles: tuple[DataLoader, Profile]):
     # Dataset class, type, datatype, size
     stream.write(" | ".join([" Dataset ".center(col_width, "-")] * len(results)) + "\n")
 
-    classes = ["Class:" + f"{"..."+result[0][-40:] if len(result[0]) > 43 else result[0]}".rjust(col_width-6) for result in results]
+    classes_max_len = (col_width * 7) // 10 # 70% of width                                                                             
+    classes = ["Class:" + f"{"..."+result[0][-classes_max_len-3:] if len(result[0]) > classes_max_len else result[0]}".rjust(col_width-6) for result in results]
     stream.write(" | ".join(classes) + "\n")
 
     types = ["Type:" + f"{result[1][-40:] if len(result[1]) > 40 else result[1]}".rjust(col_width-5) for result in results]

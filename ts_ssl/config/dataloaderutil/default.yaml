@@ -3,7 +3,7 @@ function: runarrowmmap # functions to be ran: runarrowmmap|runaugmentations|runn
 iterations: 10 # Default number of times a dataset is iterated through each run
 dataset_type: mmap # Default dataset type to be used when not testing different dataset types; mmap|happyface
 
-augmentations: [resizing, combination, resampling] # Augmentations to be compared; 3 max; resizing|resampling|combination|jittering|masking
+augmentations: [resizing, combination, resampling] # Augmentations to be compared; resizing|resampling|combination|jittering|masking; Maximum of three is recommended for easy-to-read terminal output. If more than three, viewing log file output is recommended.
 num_workers: [4, 8, 16] # Number of workers to be compared in run_num_workers; be aware of computer's map number of workers
 batch_sizes: [512, 1024, 2048] # Batch_sizes to be compared in run_batch_size
 

@@ -278,6 +278,7 @@ class SSLGroupedTimeSeriesDataset(GroupedTimeSeriesDataset):
     
     def get_augmentations(self):
         return self.augmentations
+    
     def get_raw_item(self, idx):
         # Handle different types of indices
         if isinstance(idx, (list, tuple, range)):
