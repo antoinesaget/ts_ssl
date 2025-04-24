@@ -63,7 +63,7 @@ class BYOL(SSLBase):
         self.target_encoder = torch.compile(self.target_encoder)
         self.target_projector = torch.compile(self.target_projector)
 
-    def _get_features(self, x, encoder=None):
+    def _get_features(self, x, encoder=None, aggregate=True):
         """Extract features from input using specified encoder
 
         Args:
@@ -71,14 +71,7 @@ class BYOL(SSLBase):
             encoder: Encoder to use (default: self.encoder)
         """
         encoder = encoder or self.encoder
-        h = encoder(x).flatten(start_dim=1)
-        h = h.view(
-            h.shape[0] // self.n_samples_per_group,
-            self.n_samples_per_group,
-            h.shape[1],
-        )
-        h = h.transpose(1, 2)
-        h = self.aggregation_layer(h).flatten(start_dim=1)
+        h = encoder(x, aggregate=aggregate)
         return h
 
     def forward(self, x, target=False):
