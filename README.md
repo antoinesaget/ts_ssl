@@ -14,6 +14,7 @@ RS-TS-SSL is a PyTorch-based framework designed for self-supervised learning on 
 - Various time series augmentation techniques (Jitter, Masking, Cropping, Resampling)
 - Flexible encoder architectures
 - Comprehensive evaluation and fine-tuning capabilities
+- Data visualization tools for time series inspection
 
 ## Project Structure
 
@@ -74,7 +75,7 @@ More information on the dataset can be found here: https://huggingface.co/datase
 CPU test:
 ```bash
 python ts_ssl/train.py \
-    dataset=francecrops_mini \
+    dataset=francecrops_nano \
     training.max_examples_seen=10000 \
     training.val_check_interval=100 \
     post_training_eval=true \
@@ -90,13 +91,29 @@ python ts_ssl/train.py \
 GPU test:
 ```bash
 python ts_ssl/train.py \
-    dataset=francecrops_mini \
+    dataset=francecrops_nano \
     training.max_examples_seen=40000 \
     training.val_check_interval=200 \
     post_training_eval=true \
     model.encoder.n_filters=64 \
     model.encoder.embedding_dim=128 \
     training.batch_size=64 \
+    num_workers=8 \
+    "validation.samples_per_class=[5,10]" \
+    "eval.samples_per_class=[5,10]" \
+    device=cuda
+```
+
+Low-end GPU (4GB RAM) test:
+```bash
+python ts_ssl/train.py \
+    dataset=francecrops_nano \
+    training.max_examples_seen=40000 \
+    training.val_check_interval=200 \
+    post_training_eval=true \
+    model.encoder.n_filters=48 \
+    model.encoder.embedding_dim=96 \
+    training.batch_size=96 \
     num_workers=8 \
     "validation.samples_per_class=[5,10]" \
     "eval.samples_per_class=[5,10]" \
@@ -170,6 +187,7 @@ The project uses Hydra for configuration management. Key configuration areas:
 - **Dataset**: Configure dataset parameters in `config/dataset/`
 - **Augmentations**: Modify augmentation strategies in `config/augmentations/`
 - **Training**: Adjust training parameters in `config/config.yaml`
+- **Visualization**: Configure plot settings in `config/visualizer/`
 
 For a complete list of configuration options, run:
 ```bash

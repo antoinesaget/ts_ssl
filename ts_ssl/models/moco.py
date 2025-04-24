@@ -55,7 +55,7 @@ class MoCo(SSLBase):
         self.momentum_projector = torch.compile(self.momentum_projector)
         self.criterion = torch.compile(self.criterion)
 
-    def _get_features(self, x, encoder=None):
+    def _get_features(self, x, encoder=None, aggregate=True):
         """Extract features from input using specified encoder
 
         Args:
@@ -63,14 +63,7 @@ class MoCo(SSLBase):
             encoder: Encoder to use (default: self.encoder)
         """
         encoder = encoder or self.encoder
-        h = encoder(x).flatten(start_dim=1)
-        h = h.view(
-            h.shape[0] // self.n_samples_per_group,
-            self.n_samples_per_group,
-            h.shape[1],
-        )
-        h = h.transpose(1, 2)
-        h = self.aggregation_layer(h).flatten(start_dim=1)
+        h = encoder(x, aggregate=aggregate)
         return h
 
     def forward(self, x, momentum=False):
