@@ -119,12 +119,12 @@ class Trainer:
                 epoch += 1
                 for batch in self.train_loader:
                     # Preprocess batch
-                    x1, x2 = batch
+                    x1, x2 , y = batch
                     x1 = x1.to(self.device)
                     x2 = x2.to(self.device)
-
+                    y = y.to(self.device)
                     # Training step
-                    loss_value = self.training_step((x1, x2))
+                    loss_value = self.training_step((x1, x2 ,y))
 
                     # Log metrics
                     if self.global_step % 100 == 0:

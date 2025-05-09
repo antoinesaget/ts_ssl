@@ -25,6 +25,7 @@ except ImportError:
 from ts_ssl.data.datamodule import (
     SSLGroupedTimeSeriesDataset,
     SupervisedGroupedTimeSeriesDataset,
+    GCDTimeSeries
 )
 from ts_ssl.evaluate import evaluate_main
 from ts_ssl.trainer import Trainer
@@ -102,13 +103,15 @@ def main(config):
 
     # Initialize datasets and dataloaders
     logger.info("Instantiating SSL training dataset and dataloader")
-    train_dataset = SSLGroupedTimeSeriesDataset(
+    train_dataset = GCDTimeSeries(
         data=config.dataset.ssl_data,
         n_samples_per_group=config.training.n_samples_per_group,
         percentiles=config.dataset.percentiles,
         config=config.augmentations,
         logger=logger,
         normalize_data=config.dataset.normalize,
+        known_classes = config.known_classes,
+        labeled_fraction = config.labeled_fraction,
         dataset_type=config.dataset.dataset_type,
     )
     train_loader = DataLoader(

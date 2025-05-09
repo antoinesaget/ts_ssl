@@ -1,0 +1,10 @@
+defaults:
+  - base
+  - _self_
+
+name: gcd
+_target_: ts_ssl.models.gcd.GCD
+
+projection_dim: 128
+temperature: 0.1
+n_clusters: 10  
