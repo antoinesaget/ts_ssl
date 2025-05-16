@@ -43,16 +43,16 @@ class GCD(SSLBase):
     def forward(self, x, aggregate=True):
         """Forward pass"""
         h = self._get_features(x, aggregate=aggregate)
-        z = self.projector(h)
+        z = F.normalize(self.projector(h), dim=-1)  
         logits = self.cluster_head(z)
         return z, logits
 
     def entropy_loss(self, logits):
-        """Entropy regularization: encourages confident & diverse cluster assignments"""
         probs = F.softmax(logits, dim=-1)
+        probs = torch.clamp(probs, min=1e-4)  
         avg_probs = probs.mean(dim=0)
-        entropy = -torch.sum(avg_probs * torch.log(avg_probs + 1e-6))
-        return -entropy  # Negative to maximize entropy
+        entropy = -torch.sum(avg_probs * torch.log(avg_probs))
+        return -entropy
 
     def training_step(self, batch):
         if len(batch) == 3:
@@ -83,5 +83,4 @@ class GCD(SSLBase):
                 supervised_loss = supervised_loss1 + supervised_loss2
 
                 total_loss += 0.5 * supervised_loss
-
         return total_loss

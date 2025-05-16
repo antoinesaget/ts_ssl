@@ -118,13 +118,15 @@ class Trainer:
                 self.log_metrics({"training/epoch": epoch})
                 epoch += 1
                 for batch in self.train_loader:
-                    # Preprocess batch
-                    x1, x2 , y = batch
-                    x1 = x1.to(self.device)
-                    x2 = x2.to(self.device)
-                    y = y.to(self.device)
-                    # Training step
-                    loss_value = self.training_step((x1, x2 ,y))
+                    if isinstance(batch, (list, tuple)) and len(batch) == 3:
+                        x1, x2, y = batch
+                        x1, x2, y = x1.to(self.device), x2.to(self.device), y.to(self.device)
+                        loss_value = self.training_step((x1, x2, y))
+                    else:
+                        
+                        x1, x2 = batch
+                        x1, x2 = x1.to(self.device), x2.to(self.device)
+                        loss_value = self.training_step((x1, x2))
 
                     # Log metrics
                     if self.global_step % 100 == 0:
