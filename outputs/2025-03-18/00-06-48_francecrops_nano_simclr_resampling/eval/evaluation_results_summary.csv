@@ -1,3 +1,0 @@
-test_dataset,samples_per_class,evaluator,mean_accuracy,std_accuracy,mean_majority_accuracy,std_majority_accuracy,mean_kappa,std_kappa,mean_macro_f1,std_macro_f1,num_train_subsets
-francecrops_nano,5,lr,0.4127745,,0.4804,,0.4530526315789474,,0.4727806682179076,,1
-francecrops_nano,10,lr,0.443706,,0.5248,,0.49978947368421067,,0.5211066011664163,,1
