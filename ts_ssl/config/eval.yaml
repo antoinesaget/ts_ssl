@@ -5,6 +5,13 @@ defaults:
 output_dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${dataset.name}_${model.name}_${augmentations.name}/eval
 
 eval:
+  use_kmeans: true
+  kmeans_k: 20                
+  kmeans_max_iter: 50
+  kmeans_n_init: 10
+  kmeans_plot: true
+  known_classes: [0,1,2,3,4,5,6,7,8,9]
+  unknown_classes: [10,11,12,13,14,15,16,17,18,19]   
   checkpoint_path: null
   samples_per_class: [5, 10, 20, 50, 100]
   seed: ${seed}

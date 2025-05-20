@@ -51,8 +51,8 @@ validation:
       tol: 1e-5
       C: 1.0
       n_jobs: -1  # Only used for sklearn
-known_classes: [0,1,2,3,4,5,6,7,8,9]
-labeled_fraction: 0.1
+known_classes: [0,1,2,3,4]
+labeled_fraction: 0.4
 post_training_eval: false
 eval:
   samples_per_class: [5, 10, 20, 50, 100]

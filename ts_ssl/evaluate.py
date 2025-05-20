@@ -1,14 +1,22 @@
 from pathlib import Path
 
+from sklearn.metrics import confusion_matrix
 import hydra
 import numpy as np
 import pandas as pd
 import torch
+
 from hydra.utils import instantiate
 from sklearn.metrics import cohen_kappa_score, f1_score
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from tqdm import tqdm
+from ts_ssl.utils.faster_mix_k_means_pytorch import K_Means as SemiSupKMeans
+from sklearn.metrics import normalized_mutual_info_score as nmi_score
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+from scipy.optimize import linear_sum_assignment
 
 from ts_ssl.data.datamodule import SupervisedGroupedTimeSeriesDataset
 from ts_ssl.utils.logger_manager import LoggerManager
@@ -147,7 +155,113 @@ def extract_features(model, dataloader, device, use_raw_features=False, group_si
             labels_list.append(labels)
 
     return torch.cat(features_list), torch.cat(labels_list)
+def clustering_accuracy(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred)
+    row_ind, col_ind = linear_sum_assignment(-cm)
+    acc = cm[row_ind, col_ind].sum() / cm.sum()
+    return acc
+def run_kmeans_on_unlabeled_test(model, test_loader, config, device, logger=None, known_classes=None, unknown_classes=None):
+    """
+    Run KMeans++ clustering on features extracted from test-only unlabeled data.
+    """
+    model.eval()
+    all_features = []
+    all_labels = []
 
+    with torch.no_grad():
+        for x, y in tqdm(test_loader, desc="Extracting features for KMeans"):
+            x = x.to(device)
+
+            # Extract temporal features: shape [B, T, D]
+            features = model.get_features(x, aggregate=False)
+
+            features = features.mean(dim=1)
+
+            features = torch.nn.functional.normalize(features, dim=-1)
+
+            all_features.append(features.cpu())
+            all_labels.append(y.cpu())
+
+
+    all_features = torch.cat(all_features, dim=0)
+    all_labels = torch.cat(all_labels, dim=0)
+
+    # Run KMeans++
+    k = config.eval.kmeans_k if hasattr(config.eval, "kmeans_k") else len(torch.unique(all_labels))
+    kmeans = SemiSupKMeans(
+        k=k,
+        tolerance=1e-4,
+        max_iterations=config.eval.kmeans_max_iter,
+        init='k-means++',
+        n_init=config.eval.kmeans_n_init,
+        random_state=0,
+        pairwise_batch_size=1024
+    )
+    kmeans.fit(all_features.to(device))
+
+    # Evaluate
+    pred_labels = kmeans.labels_.cpu().numpy()
+    true_labels = all_labels.numpy()
+    nmi = nmi_score(true_labels, pred_labels)
+
+    cm = confusion_matrix(true_labels, pred_labels)
+
+    cm_normalized = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+    per_class_accuracy = cm_normalized.max(axis=1)  
+
+    worst_indices = np.argsort(per_class_accuracy)[:10]
+
+    worst_10_avg = per_class_accuracy[worst_indices].mean()
+
+    print("\n Worst 10 classes (by clustering accuracy):")
+    for idx in worst_indices:
+        print(f"Class {idx}: Accuracy = {per_class_accuracy[idx]:.4f}")
+
+    print(f"\n Average clustering accuracy of worst 10 classes: {worst_10_avg:.4f}")
+    pred_labels = np.array(pred_labels)
+
+    acc_all = clustering_accuracy(true_labels, pred_labels)
+
+    mask_known = np.isin(true_labels, known_classes)
+    mask_unknown = np.isin(true_labels, unknown_classes)
+
+    # Accuracy for known
+    acc_known = clustering_accuracy(true_labels[mask_known], pred_labels[mask_known]) if mask_known.any() else None
+
+    # Accuracy for unknown
+    acc_unknown = clustering_accuracy(true_labels[mask_unknown], pred_labels[mask_unknown]) if mask_unknown.any() else None
+
+    # NMI for unknown
+    nmi_unknown = nmi_score(true_labels[mask_unknown], pred_labels[mask_unknown]) if mask_unknown.any() else None
+
+    class_ids = np.unique(true_labels)
+    df = pd.DataFrame(cm_normalized, index=[f"Class {i}" for i in class_ids],
+                                    columns=[f"Cluster {i}" for i in range(cm.shape[1])])
+
+    df.to_csv(Path(config.output_dir) / "per_class_cluster_distribution.csv")
+
+    if logger:
+        print(f"\nACC (All):     {acc_all:.4f}")
+        if acc_known is not None:
+            print(f"ACC (Known):   {acc_known:.4f}")
+        if acc_unknown is not None:
+            print(f"ACC (Unknown): {acc_unknown:.4f}")
+        if nmi_unknown is not None:
+            print(f"NMI (Unknown): {nmi_unknown:.4f}")
+    else:
+        print(f"[KMeans] NMI score on test-only unlabeled data: {nmi:.4f}")
+
+    # t-SNE plot
+    if hasattr(config.eval, "kmeans_plot") and config.eval.kmeans_plot:
+        tsne = TSNE(n_components=2, random_state=42)
+        tsne_proj = tsne.fit_transform(all_features)
+        plt.figure(figsize=(10, 8))
+        plt.scatter(tsne_proj[:, 0], tsne_proj[:, 1], c=pred_labels, cmap="tab20", s=10)
+        plt.title("t-SNE of KMeans Clusters")
+        plt.savefig(Path(config.output_dir) / "kmeans_tsne.png")
+        plt.close()
+
+    return nmi
 
 def evaluate_main(config, logger=None):
     # Setup
@@ -308,13 +422,16 @@ def evaluate_main(config, logger=None):
             logger.info(f"Using {len(data_dirs)} folds")
     else:
         # Classic mode: Extract training features from subsets
-        if hasattr(config.dataset, "num_train_subsets"):
-            train_subsets = [
-                {**config.dataset.train_data, "split": f"train_subset_{i}"}
-                for i in range(config.dataset.num_train_subsets)
-            ]
-        else:
-            train_subsets = [config.dataset.train_data]
+        train_subsets = []
+        if not config.eval.use_kmeans:
+            if hasattr(config.dataset, "num_train_subsets"):
+                train_subsets = [
+                    {**config.dataset.train_data, "split": f"train_subset_{i}"}
+                    for i in range(config.dataset.num_train_subsets)
+                ]
+            else:
+                train_subsets = [config.dataset.train_data]
+
         logger.info(f"Using {len(train_subsets)} training subsets")
 
     if config.eval.use_raw_features:
@@ -352,34 +469,35 @@ def evaluate_main(config, logger=None):
             del dataset, loader
     else:
         # Classic mode: Extract features for each training subset
-        for i, train_subset in enumerate(train_subsets):
-            subset_name = f"subset_{i}"
-            logger.info(f"\nExtracting features for training {subset_name}")
-            dataset = SupervisedGroupedTimeSeriesDataset(
-                data=train_subset,
-                percentiles=config.dataset.percentiles,
-                logger=logger,
-                normalize_data=config.dataset.normalize,
-                dataset_type=config.dataset.dataset_type,
-            )
-            loader = DataLoader(
-                dataset,
-                batch_size=config.eval.batch_size,
-                num_workers=config.num_workers,
-                shuffle=False,
-            )
+        if not config.eval.use_kmeans:
+            for i, train_subset in enumerate(train_subsets):
+                subset_name = f"subset_{i}"
+                logger.info(f"\nExtracting features for training {subset_name}")
+                dataset = SupervisedGroupedTimeSeriesDataset(
+                    data=train_subset,
+                    percentiles=config.dataset.percentiles,
+                    logger=logger,
+                    normalize_data=config.dataset.normalize,
+                    dataset_type=config.dataset.dataset_type,
+                )
+                loader = DataLoader(
+                    dataset,
+                    batch_size=config.eval.batch_size,
+                    num_workers=config.num_workers,
+                    shuffle=False,
+                )
 
-            # Extract features
-            features, labels = extract_features(
-                model,
-                loader,
-                device,
-                use_raw_features=config.eval.use_raw_features,
-                group_size=config.dataset.group_size,
-            )
-            # Store features in CPU RAM
-            features_cache[subset_name] = (features.cpu(), labels.cpu())
-            del dataset, loader
+                # Extract features
+                features, labels = extract_features(
+                    model,
+                    loader,
+                    device,
+                    use_raw_features=config.eval.use_raw_features,
+                    group_size=config.dataset.group_size,
+                )
+                # Store features in CPU RAM
+                features_cache[subset_name] = (features.cpu(), labels.cpu())
+                del dataset, loader
 
         # Extract test features
         logger.info("\nExtracting features for test dataset")
@@ -405,6 +523,11 @@ def evaluate_main(config, logger=None):
             use_raw_features=config.eval.use_raw_features,
             group_size=config.dataset.group_size,
         )
+        if config.eval.use_kmeans:
+            logger.info("Running KMeans clustering on test-only unlabeled data...")
+            nmi = run_kmeans_on_unlabeled_test(model, test_loader, config, device, logger,known_classes=config.eval.known_classes, unknown_classes=config.eval.unknown_classes)
+            logger.info(f"KMeans NMI score: {nmi:.4f}")
+
         test_features = test_features.cpu()
         test_labels = test_labels.cpu()
 
