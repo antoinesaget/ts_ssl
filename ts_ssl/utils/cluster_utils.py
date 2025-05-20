@@ -9,10 +9,12 @@ from scipy.optimize import linear_sum_assignment as linear_assignment
 import random
 import os
 import argparse
-
+from sklearn.cluster import KMeans
+from sklearn.metrics import normalized_mutual_info_score as nmi_score
 from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from sklearn.metrics import adjusted_rand_score as ari_score
-
+from sklearn.metrics import confusion_matrix
+from scipy.optimize import linear_sum_assignment
 from sklearn import metrics
 import time
 
@@ -35,7 +37,35 @@ def evaluate_clustering(y_true, y_pred):
 
     return acc, nmi, ari, pur
 
+def clustering_accuracy(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred)
+    row_ind, col_ind = linear_sum_assignment(-cm)
+    acc = cm[row_ind, col_ind].sum() / cm.sum()
+    return acc
+def find_best_k(features, labels, known_classes, k_range=(10, 30), device="cuda"):
+    best_k = None
+    best_acc = -1
+    results = []
 
+    for k in range(k_range[0], k_range[1] + 1):
+        kmeans = KMeans(n_clusters=k, random_state=0).fit(features)
+        preds = kmeans.labels_
+        
+        true_labels = labels
+        preds = np.array(preds)
+
+        known_mask = np.isin(true_labels, known_classes)
+        acc_known = clustering_accuracy(true_labels[known_mask], preds[known_mask])
+        results.append((k, acc_known))
+
+        if acc_known > best_acc:
+            best_k = k
+            best_acc = acc_known
+
+        print(f"K={k}: Known ACC = {acc_known:.4f}")
+
+    print(f"\n Best K found: {best_k} with Known ACC = {best_acc:.4f}")
+    return best_k, results
 def cluster_acc(y_true, y_pred, return_ind=False):
     """
     Calculate clustering accuracy. Require scikit-learn installed

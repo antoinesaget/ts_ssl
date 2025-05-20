@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from scipy.optimize import minimize_scalar
 from hydra.utils import instantiate
 from sklearn.metrics import cohen_kappa_score, f1_score
 from torch.utils.data import DataLoader
@@ -17,6 +18,7 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from scipy.optimize import linear_sum_assignment
+from ts_ssl.utils.cluster_utils import clustering_accuracy,find_best_k
 
 from ts_ssl.data.datamodule import SupervisedGroupedTimeSeriesDataset
 from ts_ssl.utils.logger_manager import LoggerManager
@@ -155,11 +157,22 @@ def extract_features(model, dataloader, device, use_raw_features=False, group_si
             labels_list.append(labels)
 
     return torch.cat(features_list), torch.cat(labels_list)
-def clustering_accuracy(y_true, y_pred):
-    cm = confusion_matrix(y_true, y_pred)
-    row_ind, col_ind = linear_sum_assignment(-cm)
-    acc = cm[row_ind, col_ind].sum() / cm.sum()
-    return acc
+def _evaluate_kmeans_k(k, features, labels):
+    k = int(k)
+    kmeans = SemiSupKMeans(
+        k=k,
+        tolerance=1e-4,
+        max_iterations=100,
+        init='k-means++',
+        n_init=5,
+        random_state=0,
+        pairwise_batch_size=1024,
+    )
+    kmeans.fit(features)
+    pred_labels = kmeans.labels_.cpu().numpy()
+    acc = clustering_accuracy(labels.numpy(), pred_labels)
+    return -acc 
+
 def run_kmeans_on_unlabeled_test(model, test_loader, config, device, logger=None, known_classes=None, unknown_classes=None):
     """
     Run KMeans++ clustering on features extracted from test-only unlabeled data.
@@ -186,8 +199,20 @@ def run_kmeans_on_unlabeled_test(model, test_loader, config, device, logger=None
     all_features = torch.cat(all_features, dim=0)
     all_labels = torch.cat(all_labels, dim=0)
 
-    # Run KMeans++
-    k = config.eval.kmeans_k if hasattr(config.eval, "kmeans_k") else len(torch.unique(all_labels))
+    # Determine K before calling KMeans
+    if isinstance(config.eval.kmeans_k, str) and config.eval.kmeans_k == "auto":
+        logger.info("Automatically finding optimal K using known class accuracy...")
+        best_k, _ = find_best_k(
+            all_features.numpy(),
+            all_labels.numpy(),
+            known_classes=config.eval.known_classes,
+            k_range=(10, 30),
+        )
+        k = best_k
+    else:
+        k = config.eval.kmeans_k if hasattr(config.eval, "kmeans_k") else len(torch.unique(all_labels))
+
+    # Proceed with KMeans using determined k
     kmeans = SemiSupKMeans(
         k=k,
         tolerance=1e-4,
@@ -197,6 +222,7 @@ def run_kmeans_on_unlabeled_test(model, test_loader, config, device, logger=None
         random_state=0,
         pairwise_batch_size=1024
     )
+
     kmeans.fit(all_features.to(device))
 
     # Evaluate
@@ -495,7 +521,6 @@ def evaluate_main(config, logger=None):
                     use_raw_features=config.eval.use_raw_features,
                     group_size=config.dataset.group_size,
                 )
-                # Store features in CPU RAM
                 features_cache[subset_name] = (features.cpu(), labels.cpu())
                 del dataset, loader
 
@@ -523,6 +548,42 @@ def evaluate_main(config, logger=None):
             use_raw_features=config.eval.use_raw_features,
             group_size=config.dataset.group_size,
         )
+        # Extract test features
+        test_features, test_labels = extract_features(
+            model,
+            test_loader,
+            device,
+            use_raw_features=config.eval.use_raw_features,
+            group_size=config.dataset.group_size,
+        )
+
+        # Automatically choose best K if requested
+        if config.eval.kmeans_k == "auto":
+            logger.info("Automatically finding optimal K using known class accuracy...")
+            features_2d = test_features.mean(dim=1).cpu().numpy()
+            labels_1d = test_labels.cpu().numpy()
+
+            best_k, k_results = find_best_k(
+                features_2d,
+                labels_1d, 
+                known_classes=config.eval.known_classes,
+                k_range=(10, 30)
+            )
+            config.eval.kmeans_k = best_k
+
+        # Now run KMeans clustering
+        if config.eval.use_kmeans:
+            logger.info("Running KMeans clustering on test-only unlabeled data...")
+            nmi = run_kmeans_on_unlabeled_test(
+                model,
+                test_loader,
+                config,
+                device,
+                logger,
+                known_classes=config.eval.known_classes,
+                unknown_classes=config.eval.unknown_classes
+            )
+            logger.info(f"KMeans NMI score: {nmi:.4f}")
         if config.eval.use_kmeans:
             logger.info("Running KMeans clustering on test-only unlabeled data...")
             nmi = run_kmeans_on_unlabeled_test(model, test_loader, config, device, logger,known_classes=config.eval.known_classes, unknown_classes=config.eval.unknown_classes)
